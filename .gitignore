@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+package-lock.json.bak
+
+# Environment / secrets — NEVER commit real .env files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Admin dashboard build intermediates (index.html itself IS committed —
+# these are just the raw pieces it's assembled from; see admin/README.md)
+admin/bundle.js
+admin/tailwind-output.css
+
+# Prisma
+backend/prisma/migrations/dev.db
