@@ -1,4 +1,4 @@
-# Learn & Earn — Admin Dashboard
+ # Learn & Earn — Admin Dashboard
 
 A separate React app from the main frontend, sharing the same backend.
 `index.html` is a pre-built, self-contained static file — deploy it as-is
