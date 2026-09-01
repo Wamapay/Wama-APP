@@ -7,7 +7,7 @@
     "start": "serve . -l $PORT",
     "build:css": "tailwindcss -i tailwind-input.css -o tailwind-output.css --minify",
     "build:js": "esbuild src/entry.jsx --bundle --minify --jsx=automatic --loader:.js=jsx --outfile=bundle.js",
-    "build": "npm run build:css && npm run build:js && node build.js",
+    "build:local": "npm run build:css && npm run build:js && node build.js",
     "test": "echo \"No automated tests for the admin dashboard yet\" && exit 0"
   },
   "dependencies": {
