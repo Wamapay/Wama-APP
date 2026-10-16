@@ -8,7 +8,7 @@ import {
   BadgeCheck, ChevronRight, Lock, Mail, ShieldAlert, Sparkles,
   Video, Music, Image as ImageIcon, Star, Plus, Trash2, Pencil,
   ArrowUp, ArrowDown, Pin, PinOff, Upload, Save, Archive,
-  Layers, MessageCircle, EyeOff, Send
+  Layers, MessageCircle, EyeOff, Send, Store
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -621,7 +621,9 @@ const NAV = [
     { key: "users", label: "Users", icon: Users },
     { key: "agents", label: "Agents", icon: UserCheck },
     { key: "courses", label: "Courses", icon: BookOpen },
+    { key: "creatorproducts", label: "Creator Products", icon: Layers },
     { key: "orders", label: "Orders", icon: ShoppingCart },
+    { key: "shop", label: "Shop", icon: Store },
   ]},
   { section: "FINANCE", items: [
     { key: "transactions", label: "Transactions", icon: ArrowLeftRight },
@@ -4624,6 +4626,421 @@ function ToggleSwitch({ on, onChange }) {
    only affects calculations made AFTER saving; it never rewrites
    already-recorded transactions or balances.
    ============================================================ */
+/* ============================================================
+   CREATOR PRODUCTS — review queue for products submitted by Creator
+   Store accounts. Backed by GET /admin/creator-products,
+   POST /admin/courses/:id/approve and /reject. Approving publishes the
+   product; rejecting sends the creator the reason.
+   ============================================================ */
+function CreatorProductsPage({ showToast, logAdmin }) {
+  const [tab, setTab] = useState("PENDING");
+  const [state, setState] = useState({ loading: true, error: "", courses: [] });
+  const [busyId, setBusyId] = useState(null);
+  const load = () => {
+    setState((x) => ({ ...x, loading: true, error: "" }));
+    apiFetch("/admin/creator-products?approvalStatus=" + tab)
+      .then((r) => setState({ loading: false, error: "", courses: r.courses || [] }))
+      .catch((err) => setState({ loading: false, error: err.message || "Couldn't load products.", courses: [] }));
+  };
+  useEffect(load, [tab]);
+  const act = (course, kind) => {
+    let body;
+    if (kind === "reject") {
+      const reason = window.prompt("Reason for rejecting (the creator will see this):");
+      if (!reason || reason.trim().length < 3) return;
+      body = JSON.stringify({ reason: reason.trim() });
+    }
+    setBusyId(course.id);
+    apiFetch("/admin/courses/" + course.id + "/" + kind, { method: "POST", body })
+      .then(() => {
+        showToast?.(kind === "approve" ? "Product approved and published." : "Product rejected.");
+        logAdmin?.((kind === "approve" ? "Approved" : "Rejected") + " creator product: " + course.title);
+        load();
+      })
+      .catch((err) => showToast?.(err.message || "Action failed."))
+      .finally(() => setBusyId(null));
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-display font-bold text-xl">Creator Products</h2>
+        <p className="text-sm" style={{ color: "var(--text-soft)" }}>Review products submitted by Creator Store accounts before they go live.</p>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        {[["PENDING", "Waiting for review"], ["APPROVED", "Approved"], ["REJECTED", "Rejected"], ["DRAFT", "Drafts"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} className="px-3 py-1.5 rounded-lg text-sm font-medium"
+            style={{ background: tab === k ? "var(--blue)" : "var(--border-soft)", color: tab === k ? "#fff" : "var(--text-soft)" }}>{l}</button>
+        ))}
+      </div>
+      {state.loading ? (
+        <div className="card p-5 space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+      ) : state.error ? (
+        <div className="card p-5 text-sm" style={{ color: "var(--red)" }}>{state.error}</div>
+      ) : !state.courses.length ? (
+        <div className="card p-5 text-sm" style={{ color: "var(--text-soft)" }}>Nothing here.</div>
+      ) : (
+        <div className="space-y-3">
+          {state.courses.map((c) => (
+            <div key={c.id} className="card p-4 flex items-start justify-between gap-3 flex-wrap">
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <p className="font-semibold">{c.title}</p>
+                <p className="text-xs" style={{ color: "var(--text-soft)" }}>
+                  By {c.creator?.fullName || "Unknown"} ({c.creator?.email}) · GH₵{c.price} · {c._count?.modules ?? 0} modules
+                </p>
+                {c.shortDescription || c.description ? (
+                  <p className="text-sm mt-2" style={{ color: "var(--text-soft)" }}>{(c.shortDescription || c.description || "").slice(0, 300)}</p>
+                ) : null}
+                {c.rejectionReason ? <p className="text-xs mt-2" style={{ color: "var(--red)" }}>Rejected: {c.rejectionReason}</p> : null}
+              </div>
+              {(tab === "PENDING" || tab === "REJECTED") && (
+                <div className="flex gap-2">
+                  <button disabled={busyId === c.id} onClick={() => act(c, "approve")} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--green)", color: "#fff" }}>Approve &amp; publish</button>
+                  {tab === "PENDING" && <button disabled={busyId === c.id} onClick={() => act(c, "reject")} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--red-soft)", color: "var(--red)" }}>Reject</button>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   SHOP — physical-goods storefront (public, no account needed).
+   Orders arrive here from the public site; there is no online payment,
+   so the admin confirms with the customer, collects payment offline and
+   moves the order through its statuses.
+   ============================================================ */
+const shopCopy = async (text, showToast, what) => {
+  try { await navigator.clipboard.writeText(text); showToast?.(what + " link copied."); }
+  catch (e) {
+    const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch (err) {} document.body.removeChild(t);
+    showToast?.(ok ? what + " link copied." : "Couldn't copy. Link: " + text);
+  }
+};
+const shopStoreUrl = () => API_BASE + "/shop/share";
+const shopProductUrl = (slug) => API_BASE + "/shop/share/" + encodeURIComponent(slug);
+const SHOP_STATUSES = [["PENDING", "New"], ["CONFIRMED", "Confirmed"], ["OUT_FOR_DELIVERY", "Out for delivery"], ["DELIVERED", "Delivered"], ["CANCELLED", "Cancelled"]];
+const SHOP_NEXT = { PENDING: ["CONFIRMED", "CANCELLED"], CONFIRMED: ["OUT_FOR_DELIVERY", "CANCELLED"], OUT_FOR_DELIVERY: ["DELIVERED", "CANCELLED"], DELIVERED: [], CANCELLED: [] };
+const shopLabel = (s) => (SHOP_STATUSES.find((x) => x[0] === s) || [s, s])[1];
+const shopMoney = (n) => "GH₵" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function ShopOrdersTab({ showToast, logAdmin }) {
+  const [status, setStatus] = useState("PENDING");
+  const [q, setQ] = useState("");
+  const [state, setState] = useState({ loading: true, error: "", orders: [], pendingCount: 0 });
+  const [busyId, setBusyId] = useState(null);
+  const load = () => {
+    setState((x) => ({ ...x, loading: true, error: "" }));
+    const qs = new URLSearchParams({ limit: "50" });
+    if (status) qs.set("status", status);
+    if (q.trim()) qs.set("q", q.trim());
+    apiFetch("/admin/shop/orders?" + qs.toString())
+      .then((r) => setState({ loading: false, error: "", orders: r.orders || [], pendingCount: r.pendingCount || 0 }))
+      .catch((err) => setState((x) => ({ ...x, loading: false, error: err.message || "Couldn't load orders.", orders: [] })));
+  };
+  useEffect(load, [status]);
+  const move = (o, next) => {
+    if (next === "CANCELLED" && !window.confirm("Cancel order " + o.orderNumber + "? Stock will be returned.")) return;
+    setBusyId(o.id);
+    apiFetch("/admin/shop/orders/" + o.id + "/status", { method: "PATCH", body: JSON.stringify({ status: next }) })
+      .then(() => { showToast?.("Order " + o.orderNumber + " marked " + shopLabel(next).toLowerCase() + "."); logAdmin?.("Shop order " + o.orderNumber + " → " + next); load(); })
+      .catch((err) => showToast?.(err.message || "Couldn't update the order."))
+      .finally(() => setBusyId(null));
+  };
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 flex-wrap items-center">
+        {[["", "All"], ...SHOP_STATUSES].map(([k, l]) => (
+          <button key={k || "all"} onClick={() => setStatus(k)} className="px-3 py-1.5 rounded-lg text-sm font-medium"
+            style={{ background: status === k ? "var(--blue)" : "var(--border-soft)", color: status === k ? "#fff" : "var(--text-soft)" }}>
+            {l}{k === "PENDING" && state.pendingCount > 0 ? " (" + state.pendingCount + ")" : ""}
+          </button>
+        ))}
+        <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex gap-2 ml-auto">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Order no., name or phone" className={inputClass} style={{ ...inputStyle, width: 220 }} />
+          <button type="submit" className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>Search</button>
+        </form>
+      </div>
+      {state.loading ? (
+        <div className="card p-5 space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+      ) : state.error ? (
+        <div className="card p-5 text-sm" style={{ color: "var(--red)" }}>{state.error}</div>
+      ) : !state.orders.length ? (
+        <div className="card p-5 text-sm" style={{ color: "var(--text-soft)" }}>No orders here.</div>
+      ) : (
+        <div className="space-y-3">
+          {state.orders.map((o) => (
+            <div key={o.id} className="card p-4 space-y-2">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="font-semibold">{o.orderNumber} <span className="text-xs font-medium ml-2 px-2 py-0.5 rounded-md" style={{ background: "var(--border-soft)" }}>{shopLabel(o.status)}</span></p>
+                  <p className="text-xs" style={{ color: "var(--text-soft)" }}>{o.createdAt ? new Date(o.createdAt).toLocaleString() : ""}</p>
+                </div>
+                <p className="font-display font-bold">{shopMoney(o.total)}</p>
+              </div>
+              <p className="text-sm">
+                <strong>{o.customerName}</strong> · <a href={"tel:" + o.customerPhone} style={{ color: "var(--blue)" }}>{o.customerPhone}</a>
+                {o.customerEmail ? " · " + o.customerEmail : ""}
+              </p>
+              <p className="text-sm" style={{ color: "var(--text-soft)" }}>{o.address}, {o.city}{o.region ? ", " + o.region : ""}</p>
+              {o.notes ? <p className="text-sm" style={{ color: "var(--text-soft)" }}>Note: {o.notes}</p> : null}
+              <ul className="text-sm">
+                {(o.items || []).map((i) => <li key={i.id}>{i.quantity} × {i.name} — {shopMoney(i.lineTotal)}</li>)}
+                <li style={{ color: "var(--text-soft)" }}>Delivery — {Number(o.deliveryFee) === 0 ? "Free" : shopMoney(o.deliveryFee)}</li>
+              </ul>
+              {(SHOP_NEXT[o.status] || []).length > 0 && (
+                <div className="flex gap-2 flex-wrap pt-1">
+                  {SHOP_NEXT[o.status].map((n) => (
+                    <button key={n} disabled={busyId === o.id} onClick={() => move(o, n)} className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                      style={n === "CANCELLED" ? { background: "var(--red-soft)", color: "var(--red)" } : { background: "var(--green)", color: "#fff" }}>
+                      {n === "CANCELLED" ? "Cancel order" : "Mark " + shopLabel(n).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShopProductForm({ initial, categories, onCancel, onSaved, showToast, logAdmin }) {
+  const blank = { name: "", description: "", image: "", price: "", compareAtPrice: "", origin: "", unitLabel: "", stock: "0", trackStock: true, featured: false, active: true, categoryId: "" };
+  const [f, setF] = useState(initial ? {
+    ...blank, ...initial, description: initial.description || "", image: initial.image || "", price: String(initial.price ?? ""),
+    compareAtPrice: initial.compareAtPrice ? String(initial.compareAtPrice) : "", origin: initial.origin || "", unitLabel: initial.unitLabel || "",
+    stock: String(initial.stock ?? 0), categoryId: initial.categoryId || initial.category?.id || "",
+  } : blank);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+  const save = (e) => {
+    e.preventDefault();
+    setError("");
+    if (f.name.trim().length < 2) return setError("Enter a product name.");
+    if (f.price === "" || Number(f.price) < 0 || Number.isNaN(Number(f.price))) return setError("Enter a valid price.");
+    if (f.compareAtPrice !== "" && Number(f.compareAtPrice) <= Number(f.price)) return setError("The old price must be higher than the price to show as a deal.");
+    const body = {
+      name: f.name.trim(), description: f.description.trim(), image: f.image.trim(), price: Number(f.price),
+      compareAtPrice: f.compareAtPrice === "" ? null : Number(f.compareAtPrice),
+      origin: f.origin.trim(), unitLabel: f.unitLabel.trim(), stock: Number(f.stock) || 0,
+      trackStock: f.trackStock, featured: f.featured, active: f.active, categoryId: f.categoryId || null,
+    };
+    setBusy(true);
+    apiFetch(initial ? "/admin/shop/products/" + initial.id : "/admin/shop/products", { method: initial ? "PATCH" : "POST", body: JSON.stringify(body) })
+      .then(() => { showToast?.(initial ? "Product saved." : "Product added."); logAdmin?.((initial ? "Updated" : "Added") + " shop product: " + body.name); onSaved(); })
+      .catch((err) => setError(err.message || "Couldn't save the product."))
+      .finally(() => setBusy(false));
+  };
+  const field = (label, node) => <label className="block"><span className="text-xs font-semibold block mb-1">{label}</span>{node}</label>;
+  return (
+    <form onSubmit={save} className="card p-5 space-y-3">
+      <h3 className="font-display font-semibold">{initial ? "Edit product" : "Add product"}</h3>
+      {field("Name", <input className={inputClass} style={inputStyle} value={f.name} onChange={set("name")} />)}
+      {field("Description", <textarea className={inputClass} style={inputStyle} rows={3} value={f.description} onChange={set("description")} />)}
+      <div className="grid grid-cols-2 gap-3">
+        {field("Price (GH₵)", <input className={inputClass} style={inputStyle} type="number" step="0.01" min="0" value={f.price} onChange={set("price")} />)}
+        {field("Old price (optional, shows a deal)", <input className={inputClass} style={inputStyle} type="number" step="0.01" min="0" value={f.compareAtPrice} onChange={set("compareAtPrice")} />)}
+        {field("Origin (optional)", <input className={inputClass} style={inputStyle} value={f.origin} onChange={set("origin")} placeholder="e.g. Ghana" />)}
+        {field("Size / unit (optional)", <input className={inputClass} style={inputStyle} value={f.unitLabel} onChange={set("unitLabel")} placeholder="e.g. 1kg" />)}
+        {field("Stock", <input className={inputClass} style={inputStyle} type="number" min="0" value={f.stock} onChange={set("stock")} />)}
+        {field("Category", (
+          <select className={inputClass} style={inputStyle} value={f.categoryId} onChange={set("categoryId")}>
+            <option value="">No category</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        ))}
+      </div>
+      <div>
+        <span className="text-xs font-semibold block mb-1">Image</span>
+        {f.image ? <img src={f.image} alt="" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} /> : null}
+        <FileUploadButton folder="shop" label={f.image ? "REPLACE IMAGE" : "UPLOAD IMAGE"} onUploaded={(url) => setF((x) => ({ ...x, image: url }))} />
+      </div>
+      <div className="flex gap-5 flex-wrap text-sm">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={f.trackStock} onChange={set("trackStock")} /> Track stock</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={f.featured} onChange={set("featured")} /> Popular (show on home)</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={f.active} onChange={set("active")} /> Visible in shop</label>
+      </div>
+      {error ? <p className="text-sm" style={{ color: "var(--red)" }}>{error}</p> : null}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>{busy ? "Saving…" : "Save product"}</button>
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: "var(--border-soft)" }}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function ShopProductsTab({ showToast, logAdmin }) {
+  const [state, setState] = useState({ loading: true, error: "", products: [], categories: [] });
+  const [editing, setEditing] = useState(null); // null | "new" | product
+  const [q, setQ] = useState("");
+  const load = () => {
+    setState((x) => ({ ...x, loading: true, error: "" }));
+    Promise.all([apiFetch("/admin/shop/products?limit=100" + (q.trim() ? "&q=" + encodeURIComponent(q.trim()) : "")), apiFetch("/admin/shop/categories")])
+      .then(([p, c]) => setState({ loading: false, error: "", products: p.products || [], categories: c.categories || [] }))
+      .catch((err) => setState((x) => ({ ...x, loading: false, error: err.message || "Couldn't load products." })));
+  };
+  useEffect(load, []);
+  const remove = (p) => {
+    if (!window.confirm("Delete " + p.name + "? Past orders keep their record of it.")) return;
+    apiFetch("/admin/shop/products/" + p.id, { method: "DELETE" })
+      .then(() => { showToast?.("Product deleted."); logAdmin?.("Deleted shop product: " + p.name); load(); })
+      .catch((err) => showToast?.(err.message || "Couldn't delete."));
+  };
+  if (editing) {
+    return <ShopProductForm initial={editing === "new" ? null : editing} categories={state.categories} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} showToast={showToast} logAdmin={logAdmin} />;
+  }
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 flex-wrap">
+        <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex gap-2">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products" className={inputClass} style={{ ...inputStyle, width: 220 }} />
+          <button type="submit" className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--border-soft)" }}>Search</button>
+        </form>
+        <button onClick={() => setEditing("new")} className="px-3 py-1.5 rounded-lg text-sm font-medium ml-auto" style={{ background: "var(--blue)", color: "#fff" }}>+ Add product</button>
+      </div>
+      {state.loading ? <div className="card p-5"><Skeleton className="h-12 w-full" /></div>
+        : state.error ? <div className="card p-5 text-sm" style={{ color: "var(--red)" }}>{state.error}</div>
+        : !state.products.length ? <div className="card p-5 text-sm" style={{ color: "var(--text-soft)" }}>No products yet. Add your first one.</div>
+        : (
+          <div className="space-y-2">
+            {state.products.map((p) => (
+              <div key={p.id} className="card p-3 flex items-center gap-3 flex-wrap">
+                {p.image ? <img src={p.image} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8 }} /> : <div style={{ width: 48, height: 48, borderRadius: 8, background: "var(--border-soft)" }} />}
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <p className="font-semibold text-sm">{p.name}{!p.active ? " (hidden)" : ""}{p.featured ? " ★" : ""}</p>
+                  <p className="text-xs" style={{ color: "var(--text-soft)" }}>
+                    {shopMoney(p.price)}{p.compareAtPrice ? " (was " + shopMoney(p.compareAtPrice) + ")" : ""} · {p.trackStock ? p.stock + " in stock" : "stock not tracked"}{p.category?.name ? " · " + p.category.name : ""}
+                  </p>
+                </div>
+                <button onClick={() => shopCopy(shopProductUrl(p.slug), showToast, "Product")} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}>Copy link</button>
+                <button onClick={() => setEditing(p)} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--border-soft)" }}>Edit</button>
+                <button onClick={() => remove(p)} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--red-soft)", color: "var(--red)" }}>Delete</button>
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+function ShopCategoriesTab({ showToast, logAdmin }) {
+  const [state, setState] = useState({ loading: true, error: "", categories: [] });
+  const [name, setName] = useState("");
+  const [comingSoon, setComingSoon] = useState(false);
+  const load = () => apiFetch("/admin/shop/categories")
+    .then((r) => setState({ loading: false, error: "", categories: r.categories || [] }))
+    .catch((err) => setState({ loading: false, error: err.message || "Couldn't load categories.", categories: [] }));
+  useEffect(() => { load(); }, []);
+  const add = (e) => {
+    e.preventDefault();
+    if (name.trim().length < 2) return;
+    apiFetch("/admin/shop/categories", { method: "POST", body: JSON.stringify({ name: name.trim(), comingSoon, position: state.categories.length }) })
+      .then(() => { showToast?.("Category added."); logAdmin?.("Added shop category: " + name.trim()); setName(""); setComingSoon(false); load(); })
+      .catch((err) => showToast?.(err.message || "Couldn't add."));
+  };
+  const patch = (c, body) => apiFetch("/admin/shop/categories/" + c.id, { method: "PATCH", body: JSON.stringify(body) })
+    .then(load).catch((err) => showToast?.(err.message || "Couldn't update."));
+  const remove = (c) => {
+    if (!window.confirm("Delete the " + c.name + " category? Its products stay but become uncategorised.")) return;
+    apiFetch("/admin/shop/categories/" + c.id, { method: "DELETE" })
+      .then(() => { showToast?.("Category deleted."); load(); }).catch((err) => showToast?.(err.message || "Couldn't delete."));
+  };
+  return (
+    <div className="space-y-4">
+      <form onSubmit={add} className="card p-4 flex gap-3 flex-wrap items-end">
+        <label className="block flex-1" style={{ minWidth: 180 }}><span className="text-xs font-semibold block mb-1">New category</span>
+          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Groceries" /></label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={comingSoon} onChange={(e) => setComingSoon(e.target.checked)} /> Coming soon</label>
+        <button type="submit" className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>Add</button>
+      </form>
+      {state.loading ? <div className="card p-5"><Skeleton className="h-12 w-full" /></div>
+        : state.error ? <div className="card p-5 text-sm" style={{ color: "var(--red)" }}>{state.error}</div>
+        : !state.categories.length ? <div className="card p-5 text-sm" style={{ color: "var(--text-soft)" }}>No categories yet.</div>
+        : state.categories.map((c) => (
+          <div key={c.id} className="card p-3 flex items-center gap-3 flex-wrap">
+            <p className="font-semibold text-sm flex-1" style={{ minWidth: 140 }}>{c.name} <span className="text-xs font-normal" style={{ color: "var(--text-soft)" }}>· {c.productCount} products</span></p>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!c.comingSoon} onChange={(e) => patch(c, { comingSoon: e.target.checked })} /> Coming soon</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={c.active !== false} onChange={(e) => patch(c, { active: e.target.checked })} /> Visible</label>
+            <button onClick={() => remove(c)} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--red-soft)", color: "var(--red)" }}>Delete</button>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function ShopSettingsTab({ showToast, logAdmin }) {
+  const [f, setF] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    apiFetch("/admin/shop/settings").then((r) => {
+      const s = r.settings || {};
+      setF({ enabled: s.enabled !== false, deliveryFee: String(s.deliveryFee ?? 0), freeDeliveryAbove: s.freeDeliveryAbove == null ? "" : String(s.freeDeliveryAbove), whatsappNumber: s.whatsappNumber || "", phone1: s.phone1 || "", phone2: s.phone2 || "", announcement: s.announcement || "" });
+    }).catch((err) => setError(err.message || "Couldn't load settings."));
+  }, []);
+  if (!f) return <div className="card p-5 text-sm" style={{ color: error ? "var(--red)" : "var(--text-soft)" }}>{error || "Loading…"}</div>;
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+  const save = (e) => {
+    e.preventDefault();
+    setError("");
+    if (f.deliveryFee === "" || Number(f.deliveryFee) < 0) return setError("Enter a delivery fee (0 for free delivery).");
+    setBusy(true);
+    apiFetch("/admin/shop/settings", { method: "PATCH", body: JSON.stringify({
+      enabled: f.enabled, deliveryFee: Number(f.deliveryFee), freeDeliveryAbove: f.freeDeliveryAbove === "" ? null : Number(f.freeDeliveryAbove),
+      whatsappNumber: f.whatsappNumber.trim(), phone1: f.phone1.trim(), phone2: f.phone2.trim(), announcement: f.announcement.trim(),
+    }) })
+      .then(() => { showToast?.("Shop settings saved."); logAdmin?.("Updated shop settings"); })
+      .catch((err) => setError(err.message || "Couldn't save."))
+      .finally(() => setBusy(false));
+  };
+  const field = (label, node, hint) => <label className="block"><span className="text-xs font-semibold block mb-1">{label}</span>{node}{hint ? <span className="text-[11px] block mt-1" style={{ color: "var(--text-soft)" }}>{hint}</span> : null}</label>;
+  return (
+    <form onSubmit={save} className="card p-5 space-y-3" style={{ maxWidth: 560 }}>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.enabled} onChange={set("enabled")} /> Shop is open for new orders</label>
+      {field("Delivery fee (GH₵)", <input className={inputClass} style={inputStyle} type="number" step="0.01" min="0" value={f.deliveryFee} onChange={set("deliveryFee")} />, "Set 0 for free delivery.")}
+      {field("Free delivery above (GH₵, optional)", <input className={inputClass} style={inputStyle} type="number" step="0.01" min="0" value={f.freeDeliveryAbove} onChange={set("freeDeliveryAbove")} />, "Orders at or above this subtotal get free delivery. Leave empty for none.")}
+      {field("WhatsApp number", <input className={inputClass} style={inputStyle} value={f.whatsappNumber} onChange={set("whatsappNumber")} placeholder="e.g. 0241234567" />, "Customers can send their order to this number.")}
+      {field("Phone 1", <input className={inputClass} style={inputStyle} value={f.phone1} onChange={set("phone1")} />)}
+      {field("Phone 2", <input className={inputClass} style={inputStyle} value={f.phone2} onChange={set("phone2")} />)}
+      {field("Announcement bar (optional)", <input className={inputClass} style={inputStyle} maxLength={200} value={f.announcement} onChange={set("announcement")} placeholder="e.g. Free delivery this weekend!" />)}
+      {error ? <p className="text-sm" style={{ color: "var(--red)" }}>{error}</p> : null}
+      <button type="submit" disabled={busy} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>{busy ? "Saving…" : "Save settings"}</button>
+    </form>
+  );
+}
+
+function ShopPage({ showToast, logAdmin }) {
+  const [tab, setTab] = useState("orders");
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-display font-bold text-xl">Shop</h2>
+        <p className="text-sm" style={{ color: "var(--text-soft)" }}>Manage the public shop: customer orders, products, categories, and delivery settings.</p>
+        <div className="flex gap-2 flex-wrap mt-2">
+          <button onClick={() => shopCopy(shopStoreUrl(), showToast, "Shop")} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}>Copy shop link</button>
+          <button onClick={() => window.open(shopStoreUrl(), "_blank", "noopener")} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--border-soft)" }}>Open shop</button>
+        </div>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        {[["orders", "Orders"], ["products", "Products"], ["categories", "Categories"], ["settings", "Delivery & settings"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} className="px-3 py-1.5 rounded-lg text-sm font-medium"
+            style={{ background: tab === k ? "var(--ink, #0A0E17)" : "var(--border-soft)", color: tab === k ? "#fff" : "var(--text-soft)" }}>{l}</button>
+        ))}
+      </div>
+      {tab === "orders" ? <ShopOrdersTab showToast={showToast} logAdmin={logAdmin} />
+        : tab === "products" ? <ShopProductsTab showToast={showToast} logAdmin={logAdmin} />
+        : tab === "categories" ? <ShopCategoriesTab showToast={showToast} logAdmin={logAdmin} />
+        : <ShopSettingsTab showToast={showToast} logAdmin={logAdmin} />}
+    </div>
+  );
+}
+
 function SettingsPage({ showToast, logAdmin }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -4656,6 +5073,7 @@ function SettingsPage({ showToast, logAdmin }) {
           commissionRatePercent: String(s.commissionRatePercent),
           verificationThreshold: String(s.verificationThreshold),
           withdrawalFeeRatePercent: String(s.withdrawalFeeRatePercent),
+          creatorFeePercent: String(s.creatorFeePercent ?? 20),
           rewardTiers: s.rewardTiers.map((t) => ({ milestone: String(t.milestone), amount: String(t.amount) })),
           platformName: s.platformName || "",
           logoUrl: s.logoUrl || "",
@@ -4758,6 +5176,7 @@ function SettingsPage({ showToast, logAdmin }) {
         commissionRatePercent: Number(form.commissionRatePercent),
         verificationThreshold: parseInt(form.verificationThreshold, 10),
         withdrawalFeeRatePercent: Number(form.withdrawalFeeRatePercent),
+        creatorFeePercent: Number(form.creatorFeePercent),
         rewardTiers,
         platformName: form.platformName.trim(),
         // Empty optional fields are sent as null (clear), not "" —
@@ -4922,6 +5341,9 @@ function SettingsPage({ showToast, logAdmin }) {
           </Field>
           <Field label="Withdrawal Fee (%)" hint="Deducted from the gross amount on every withdrawal.">
             <input type="number" min="0" max="100" step="0.01" value={form.withdrawalFeeRatePercent} onChange={set("withdrawalFeeRatePercent")} className={inputClass} style={inputStyle} />
+          </Field>
+          <Field label="Creator Store Platform Cut (%)" hint="Share of every creator-store sale the platform keeps. The creator receives the rest.">
+            <input type="number" min="0" max="100" step="0.01" value={form.creatorFeePercent} onChange={set("creatorFeePercent")} className={inputClass} style={inputStyle} />
           </Field>
         </div>
       </div>
@@ -5805,6 +6227,10 @@ export default function AdminDashboardApp() {
               />
             ) : route === "reports" ? (
               <ReportsPage loading={loading} accounts={accounts} courses={courses} orders={orders} financeStats={financeStats} logAdmin={logAdmin} showToast={showToast} />
+            ) : route === "shop" ? (
+              <ShopPage showToast={showToast} logAdmin={logAdmin} />
+            ) : route === "creatorproducts" ? (
+              <CreatorProductsPage showToast={showToast} logAdmin={logAdmin} />
             ) : route === "settings" ? (
               <SettingsPage showToast={showToast} logAdmin={logAdmin} />
             ) : route === "notifications" ? (
