@@ -1366,10 +1366,10 @@ function AuthProvider({
   // does NOT log the person in here — it issues an email verification
   // token/link (src/services/auth.service.js issueEmailVerificationToken)
   // and the account stays unverified until that link is opened.
-  const register = async ({ fullName, email, phone, password, referralCode }) => {
+  const register = async ({ fullName, email, phone, password, referralCode, accountType }) => {
     return apiFetch("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ fullName, email, phone, password, referralCode }),
+      body: JSON.stringify({ fullName, email, phone, password, referralCode, accountType }),
     });
   };
 
@@ -2187,6 +2187,12 @@ function agentIdFromAccountId(realUserId) {
 function buildReferralLink(agentId) {
   const base = (window.location.origin + window.location.pathname).replace(/\/$/, "");
   return base + "/#/?ref=" + agentId;
+}
+/* Each product's own shareable link. Anyone can open it; if the sharer is
+   a promoter their ID rides along as ?ref= so purchases credit them. */
+function buildProductLink(slug, agentId) {
+  const base = (window.location.origin + window.location.pathname).replace(/\/$/, "");
+  return base + "/#/products/" + encodeURIComponent(slug) + (agentId ? "?ref=" + agentId : "");
 }
 function buildQrCodeUrl(link, size = 240) {
   return "https://api.qrserver.com/v1/create-qr-code/?size=" + size + "x" + size + "&margin=8&data=" + encodeURIComponent(link);
@@ -3525,6 +3531,7 @@ function WalletProvider({ children }) {
   }, [isLoggedIn]);
 
   const { cashbackBalance, commissionBalance, rewardBalance, availableWithdrawalBalance } = balances;
+  const earningsBalance = Number(balances.earningsBalance || 0);
   // Kept as `availableBalance` too since most of the existing wallet UI
   // already reads that name — same real number either way.
   const availableBalance = availableWithdrawalBalance;
@@ -3575,7 +3582,7 @@ function WalletProvider({ children }) {
 
   return h(WalletCtx.Provider, {
     value: {
-      cashbackBalance, commissionBalance, rewardBalance, availableBalance,
+      cashbackBalance, commissionBalance, rewardBalance, earningsBalance, availableBalance,
       cashbackWithdrawn, commissionWithdrawn, rewardWithdrawn,
       balancesLoading, withdrawalsLoading, cashbackLoading,
       withdrawals, getWithdrawal, requestWithdrawal, refreshWallet,
@@ -3710,6 +3717,7 @@ function Input({
     className: "label-field"
   }, label), /*#__PURE__*/React.createElement("input", {
     id: id,
+    name: id,
     className: cn("input-field", error && "input-error"),
     ...props
   }), error && /*#__PURE__*/React.createElement("p", {
@@ -3764,7 +3772,8 @@ function PasswordInput({
   value,
   onChange,
   showStrength,
-  placeholder
+  placeholder,
+  autoComplete
 }) {
   const [visible, setVisible] = useState(false);
   const st = showStrength ? passwordStrength(value) : null;
@@ -3775,6 +3784,8 @@ function PasswordInput({
     className: "relative"
   }, /*#__PURE__*/React.createElement("input", {
     id: id,
+    name: id,
+    autoComplete: autoComplete,
     type: visible ? "text" : "password",
     value: value,
     onChange: onChange,
@@ -5332,12 +5343,14 @@ function CashbackDetails() {
 // (financial.validator.js createWithdrawalSchema: balanceType is exactly
 // one of CASHBACK | COMMISSION | REWARD per withdrawal; there is no
 // cross-balance "allocation").
-function BalanceTypeCard({ balanceType, setBalanceType, cashbackBalance, commissionBalance, rewardBalance }) {
+function BalanceTypeCard({ balanceType, setBalanceType, cashbackBalance, commissionBalance, rewardBalance, earningsBalance = 0 }) {
   const options = [
     ["CASHBACK", "Cashback", cashbackBalance, "trophy", "var(--goldDeep)"],
     ["COMMISSION", "Commission", commissionBalance, "wallet", "var(--blue)"],
     ["REWARD", "Reward", rewardBalance, "sparkles", "var(--greenDeep)"],
   ];
+  // Creator-store earnings only appear for accounts that have some.
+  if (earningsBalance > 0) options.push(["EARNINGS", "Store earnings", earningsBalance, "bag", "var(--gold)"]);
   return h("div", { className: "grid grid-3 g3" },
     options.map(([val, label, balance, icon, iconColor]) => {
       const active = balanceType === val;
@@ -5407,7 +5420,7 @@ function PaystackTransferBadgeRow() {
 }
 function WithdrawFunds() {
   const {
-    cashbackBalance, commissionBalance, rewardBalance,
+    cashbackBalance, commissionBalance, rewardBalance, earningsBalance,
     requestWithdrawal, isSubmitting, setIsSubmitting
   } = useWallet();
   const { toast } = useToast();
@@ -5446,7 +5459,7 @@ function WithdrawFunds() {
       .catch(err => setBanks({ loading: false, error: err.message, items: [] }));
   }, [method]);
 
-  const balanceForType = { CASHBACK: cashbackBalance, COMMISSION: commissionBalance, REWARD: rewardBalance }[balanceType];
+  const balanceForType = { CASHBACK: cashbackBalance, COMMISSION: commissionBalance, REWARD: rewardBalance, EARNINGS: earningsBalance }[balanceType];
   const amountNum = parseFloat(amount) || 0;
   // Displayed only — the real fee/net figures shown after submission come
   // straight from the backend's response, never from this calculation
@@ -5574,7 +5587,7 @@ function WithdrawFunds() {
         }, h(Icon, { name: "wallet", size: 26 })))),
     h("div", { className: "card p5" },
       h("h2", { className: "font-display font-semibold text-base mb3" }, "Withdraw From"),
-      h(BalanceTypeCard, { balanceType, setBalanceType, cashbackBalance, commissionBalance, rewardBalance })),
+      h(BalanceTypeCard, { balanceType, setBalanceType, cashbackBalance, commissionBalance, rewardBalance, earningsBalance })),
     h("div", { className: "card p5" },
       h("div", { className: "flex items-center justify-between mb2" },
         h("label", { className: "label-field", htmlFor: "wd-amount", style: { margin: 0 } }, "Amount to Withdraw (GH₵)"),
@@ -5874,7 +5887,7 @@ function WalletBreakdownTile({ label, value, icon, tint, iconBg, waveColor }) {
       h("path", { d: "M0 22 C 60 4, 120 34, 180 18 S 300 6, 300 20 L300 40 L0 40 Z", fill: waveColor })));
 }
 function WalletPage() {
-  const { cashbackBalance, commissionBalance, rewardBalance, availableBalance, refreshWallet } = useWallet();
+  const { cashbackBalance, commissionBalance, rewardBalance, earningsBalance, availableBalance, refreshWallet } = useWallet();
   useEffect(() => { refreshWallet(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return h("div", { className: "space-y-lg" },
     h("div", { style: { position: "relative", overflow: "hidden", borderRadius: 18 } },
@@ -5917,6 +5930,10 @@ function WalletPage() {
         h(WalletBreakdownTile, {
           label: "Rewards", value: formatGHS(rewardBalance), icon: h(WalletTrophyIcon, null),
           iconBg: "linear-gradient(135deg, #34C08C, #0F5239)", tint: "linear-gradient(160deg, #EAFBF3, #FFFFFF)", waveColor: "rgba(11,125,87,.18)"
+        }),
+        earningsBalance > 0 && h(WalletBreakdownTile, {
+          label: "Store earnings", value: formatGHS(earningsBalance), icon: h(WalletGiftIcon, null),
+          iconBg: "linear-gradient(135deg, #F7C948, #8F6B00)", tint: "linear-gradient(160deg, #FFF8E6, #FFFFFF)", waveColor: "rgba(185,137,0,.22)"
         }),
         h(WalletBreakdownTile, {
           label: "Total Available", value: formatGHS(availableBalance), icon: h(WalletBadgeIcon, null),
@@ -6230,6 +6247,23 @@ function ShareButtons({ link, caption }) {
     }, t.label)),
     h("button", { type: "button", className: "btn btn-secondary btn-sm", onClick: nativeShare }, h(Icon, { name: "share", size: 13 }), "More / Share"));
 }
+function ProductShareCard({ slug, title }) {
+  const { agentId, isAgent } = useAgent();
+  const { toast } = useToast();
+  const link = buildProductLink(slug, isAgent ? agentId : null);
+  const doCopy = async () => {
+    const ok = await copyText(link);
+    toast({ type: ok ? "success" : "error", title: ok ? "Product link copied." : "Couldn't copy the link." });
+  };
+  return h("div", { className: "card p5", style: { marginTop: 16 } },
+    h("p", { className: "font-medium text-sm mb1" }, "Share this product"),
+    h("p", { className: "text-xs muted mb3", style: { lineHeight: 1.5 } },
+      isAgent ? "This is your personal link for this product. You earn commission when someone buys through it." : "Send this link to anyone to open this product directly."),
+    h("div", { className: "flex g2 mb3", style: { flexWrap: "wrap" } },
+      h("input", { readOnly: true, value: link, className: "input-field font-mono text-xs", style: { flex: 1, minWidth: 160 }, onFocus: e => e.target.select() }),
+      h("button", { type: "button", className: "btn btn-primary btn-sm", onClick: doCopy }, h(Icon, { name: "copy", size: 13 }), "Copy")),
+    h(ShareButtons, { link, caption: title ? "Check out " + title + " on Wamton." : "Check this out on Wamton." }));
+}
 function ReferralLinkCard() {
   const { referralLink } = useAgent();
   return h("div", { className: "card p5" },
@@ -6367,7 +6401,11 @@ function AgentOnboarding({ onDismiss }) {
       steps.map((s, i) => h("li", { key: i }, s))),
     h("button", { className: "btn btn-primary btn-sm", onClick: onDismiss }, "Start Sharing"));
 }
-function PromoMaterialCard({ product, referralLink }) {
+function PromoMaterialCard({ product, referralLink: homeLink }) {
+  // Each product gets its own personal link (falls back to the general
+  // link if the product has no slug/id).
+  const { agentId } = useAgent();
+  const referralLink = (product.slug || product.id) ? buildProductLink(product.slug || product.id, agentId) : homeLink;
   const { toast } = useToast();
   const [working, setWorking] = useState(false);
   const caption = "Learn practical " + (product.category ? product.category.name : "") + " skills with " + product.title + ". Start learning today.";
@@ -6863,6 +6901,9 @@ const publicLinks = [{
   to: "/products",
   label: "Products"
 }, {
+  to: "/shop",
+  label: "Shop"
+}, {
   to: "/how-it-works",
   label: "How It Works"
 }, {
@@ -6878,6 +6919,9 @@ const privateLinks = [{
 }, {
   to: "/products",
   label: "Products"
+}, {
+  to: "/shop",
+  label: "Shop"
 }, {
   to: "/dashboard/learning",
   label: "My Learning"
@@ -7004,7 +7048,11 @@ function UserMenu({
     to: "/dashboard/wallet",
     label: "Wallet",
     icon: "wallet"
-  }].concat(hasCertificate ? [{
+  }].concat(user.accountType === "CREATOR" ? [{
+    to: "/creator",
+    label: "Creator Studio",
+    icon: "bag"
+  }] : []).concat(hasCertificate ? [{
     to: "/dashboard/certificate",
     label: "Certificate",
     icon: "shieldCheck"
@@ -7126,6 +7174,7 @@ function Navbar({
   const rawLinks = isLoggedIn ? privateLinks : publicLinks;
   const links = path === "/signup" ? rawLinks.filter(l => l.label !== "Products") : rawLinks;
   const HEADER_H = 84;
+  if (path === "/") return null; // the landing page draws its own transparent header
   return /*#__PURE__*/React.createElement("header", {
     className: "navbar",
     style: { position: "relative", background: "#fff" }
@@ -7514,79 +7563,153 @@ function ProductTeaser({ img, tag, cat, title, desc, price, rating, count, slug 
     )
   );
 }
+/* ================================================================== */
+/* Landing page (redesign): transparent header over a mountain hero,   */
+/* features strip, category cards, best sellers, shop banner.          */
+/* Swap LANDING_HERO_IMG to change the hero/category background photo. */
+/* ================================================================== */
+const LANDING_HERO_IMG = "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=2000&q=70";
+const LANDING_BLUE = "#0A66FF";
+const LANDING_NAVY = "linear-gradient(135deg,#0B2A55,#0A3D7A 55%,#0B5BB5)";
+function useIsNarrow(px = 860) {
+  const [n, setN] = useState(() => typeof window !== "undefined" && window.innerWidth < px);
+  useEffect(() => {
+    const f = () => setN(window.innerWidth < px);
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, [px]);
+  return n;
+}
+function LandingBackdrop({ overlay, children, style }) {
+  return h("div", { style: { position: "relative", overflow: "hidden", background: LANDING_NAVY, ...style } },
+    h("img", { src: LANDING_HERO_IMG, alt: "", onError: e => { e.currentTarget.style.display = "none"; }, style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 } }),
+    h("div", { style: { position: "absolute", inset: 0, zIndex: 1, background: overlay } }),
+    h("div", { style: { position: "relative", zIndex: 2 } }, children));
+}
+function HomeNav({ path }) {
+  const narrow = useIsNarrow();
+  const [open, setOpen] = useState(false);
+  const { isLoggedIn } = useAuth();
+  const cart = useShopCart();
+  const links = [["/", "Home"], ["/products", "Products"], ["/shop", "Shop"], ["/about", "About"], ["/contact", "Contact"]];
+  const iconBtn = { position: "relative", width: 38, height: 38, display: "grid", placeItems: "center", color: "#fff", background: "transparent", border: "none", cursor: "pointer" };
+  return h("header", { style: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 20 } },
+    h("div", { className: "container-page flex items-center justify-between", style: { height: 84, gap: 12 } },
+      h(Link, { to: "/", style: { flexShrink: 0, background: "#fff", borderRadius: 14, padding: "6px 14px", boxShadow: "0 4px 18px rgba(0,0,0,.25)" } }, h("img", { src: WAMTON_WORDMARK, alt: "Wamton", style: { height: 38, width: "auto", display: "block" } })),
+      !narrow && h("nav", { className: "flex items-center g2", style: { marginLeft: 24, flex: 1 } },
+        links.map(([to, label]) => h(Link, { key: to, to, style: { padding: "9px 18px", borderRadius: 999, fontWeight: 600, fontSize: 15, color: "#fff", background: path === to ? LANDING_BLUE : "transparent" } }, label))),
+      h("div", { className: "flex items-center g1", style: { marginLeft: "auto" } },
+        h(Link, { to: "/products", "aria-label": "Search products", style: iconBtn }, h(Icon, { name: "search", size: 21 })),
+        h(Link, { to: isLoggedIn ? "/dashboard" : "/login", "aria-label": isLoggedIn ? "My account" : "Log in", style: iconBtn }, h(Icon, { name: "user", size: 21 })),
+        h(Link, { to: "/cart", "aria-label": "Cart", style: iconBtn }, h(Icon, { name: "bag", size: 21 }),
+          h("span", { style: { position: "absolute", top: 0, right: 0, minWidth: 18, height: 18, borderRadius: 999, background: LANDING_BLUE, color: "#fff", fontSize: 10.5, fontWeight: 700, display: "grid", placeItems: "center", padding: "0 4px" } }, cart.count)),
+        narrow && h("button", { type: "button", "aria-label": "Menu", onClick: () => setOpen(v => !v), style: iconBtn }, h(Icon, { name: open ? "x" : "menu", size: 23 })))),
+    narrow && open && h("div", { className: "fade-in", style: { margin: "0 16px", borderRadius: 16, background: "rgba(8,24,52,.92)", backdropFilter: "blur(10px)", padding: 10 } },
+      links.map(([to, label]) => h(Link, { key: to, to, onClick: () => setOpen(false), style: { display: "block", padding: "12px 14px", borderRadius: 10, color: "#fff", fontWeight: 600, background: path === to ? LANDING_BLUE : "transparent" } }, label)),
+      !isLoggedIn && h(Link, { to: "/signup", onClick: () => setOpen(false), style: { display: "block", padding: "12px 14px", color: "#fff", fontWeight: 600 } }, "Create account")));
+}
+const LANDING_FEATURES = [
+  ["grad", "Quality Learning", "Step-by-step practical training."],
+  ["shieldCheck", "Secure Payments", "Safe and reliable transactions."],
+  ["users", "Referral Rewards", "Share and earn commissions."],
+  ["phone", "24/7 Support", "We're always here to help."],
+];
+const LANDING_CAT_FALLBACK = [
+  { id: "forex", name: "Forex Trading", slug: "forex", description: "Learn. Trade. Grow." },
+  { id: "crypto", name: "Crypto Trading", slug: "crypto", description: "Master the Markets." },
+  { id: "affiliate", name: "Affiliate Marketing", slug: "affiliate", description: "Promote. Earn. Repeat." },
+  { id: "ecommerce", name: "E-Commerce", slug: "ecommerce", description: "Build Your Online Store." },
+];
+function landingCatIcon(slug) {
+  const s = String(slug || "").toLowerCase();
+  if (s.includes("forex")) return "trendingUp";
+  if (s.includes("crypto")) return "wallet";
+  if (s.includes("affiliate") || s.includes("market")) return "megaphone";
+  if (s.includes("commerce") || s.includes("shop")) return "bag";
+  return "grad";
+}
+function LandingCategoryCard({ c }) {
+  return h(Link, { to: c.backendId ? "/products?category=" + encodeURIComponent(c.slug) : "/products", className: "card", style: { display: "block", overflow: "hidden", borderRadius: 14, background: "#fff", border: "2px solid rgba(255,255,255,.9)" } },
+    h("div", { style: { height: 104, background: LANDING_NAVY, position: "relative" } },
+      c.image ? h("img", { src: c.image, alt: "", loading: "lazy", style: { width: "100%", height: "100%", objectFit: "cover", display: "block" } }) : null),
+    h("div", { style: { position: "relative", padding: "20px 16px 14px" } },
+      h("span", { style: { position: "absolute", top: -18, left: 14, width: 36, height: 36, borderRadius: 999, background: LANDING_BLUE, color: "#fff", display: "grid", placeItems: "center", border: "3px solid #fff" } }, h(Icon, { name: landingCatIcon(c.slug), size: 16 })),
+      h("div", { className: "flex items-center justify-between g2" },
+        h("p", { className: "font-display font-bold", style: { fontSize: 16, color: "var(--ink)", marginLeft: 36 } }, c.name),
+        h("span", { style: { width: 26, height: 26, borderRadius: 999, background: LANDING_BLUE, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 } }, h(Icon, { name: "arrowRight", size: 13 }))),
+      c.description && h("p", { className: "text-sm muted", style: { marginTop: 4 } }, c.description)));
+}
+function LandingProductCard({ p, badge }) {
+  const price = Number(p.price);
+  return h(Link, { to: "/products/" + p.slug, className: "card", style: { display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 14 } },
+    h("div", { style: { position: "relative", height: 150, background: LANDING_NAVY } },
+      p.thumbnail ? h("img", { src: p.thumbnail, alt: "", loading: "lazy", style: { width: "100%", height: "100%", objectFit: "cover", display: "block" } }) : null,
+      badge && h("span", { style: { position: "absolute", top: 10, left: 0, background: LANDING_BLUE, color: "#fff", fontSize: 10.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", padding: "4px 10px", borderRadius: "0 6px 6px 0" } }, badge),
+      h("span", { style: { position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: 999, background: "rgba(255,255,255,.92)", display: "grid", placeItems: "center" } }, h(Icon, { name: "star", size: 14 }))),
+    h("div", { style: { padding: "14px 16px 16px", display: "flex", flexDirection: "column", gap: 6, flex: 1 } },
+      p.category && h("span", { style: { fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: LANDING_BLUE } }, p.category.name),
+      h("p", { className: "font-display font-bold", style: { fontSize: 16, lineHeight: 1.25, color: "var(--ink)" } }, p.title),
+      p.desc && h("p", { className: "text-sm muted", style: { lineHeight: 1.45 } }, p.desc),
+      h("p", { className: "font-bold", style: { marginTop: "auto", paddingTop: 6, color: LANDING_BLUE, fontSize: 16 } }, "GHS " + (Number.isFinite(price) ? price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : p.price))));
+}
 function Home() {
-  const products = [
-    { slug: "forex-masterclass", tag: "Best Seller", cat: "Trading", title: "Forex Trading Masterclass", desc: "Read charts, manage risk and trade with a repeatable system.", price: "GHS 450.00", rating: 4.8, count: 128, img: "https://loremflickr.com/500/380/trading,laptop,forex?lock=101" },
-    { slug: "crypto-masterclass", tag: "Popular", cat: "Crypto", title: "Crypto Trading Masterclass", desc: "Evaluate coins and trade with a clear, low-drama strategy.", price: "GHS 400.00", rating: 4.7, count: 96, img: "https://loremflickr.com/500/380/bitcoin,coins,crypto?lock=202" },
-    { slug: "digital-marketing-masterclass", tag: "Trending", cat: "Digital Marketing", title: "Digital Marketing Masterclass", desc: "Plan, run and measure ads across the platforms customers use.", price: "GHS 350.00", rating: 4.9, count: 74, img: "https://loremflickr.com/500/380/smartphone,socialmedia,marketing?lock=303" },
-    { slug: "ecommerce-masterclass", tag: "New", cat: "E-commerce", title: "E-Commerce Masterclass", desc: "Launch and run an online store from sourcing to fulfillment.", price: "GHS 380.00", rating: 4.7, count: 51, img: "https://loremflickr.com/500/380/laptop,ecommerce,shop?lock=404" }
-  ];
+  const narrow = useIsNarrow();
+  const [cats, setCats] = useState(null);
+  const [prods, setProds] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    apiFetch("/categories?limit=4").then(r => { if (!dead) setCats((r.categories || []).slice(0, 4).map(mapBackendCategory)); }).catch(() => { if (!dead) setCats([]); });
+    apiFetch("/courses?" + new URLSearchParams({ featured: "true", limit: "4" }).toString())
+      .then(r => (r.courses && r.courses.length ? r : apiFetch("/courses?limit=4")))
+      .then(r => { if (!dead) setProds((r.courses || []).slice(0, 4).map(mapCourseListItem)); })
+      .catch(() => { if (!dead) setProds([]); });
+    return () => { dead = true; };
+  }, []);
+  const catList = cats && cats.length ? cats : LANDING_CAT_FALLBACK;
+  const bigBtn = { padding: "14px 26px", borderRadius: 999, fontWeight: 700, fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 };
   return h("div", null,
-    h("section", {
-      style: { position: "relative", overflow: "hidden" }
-    },
-      h("div", { style: { position: "relative", height: 560 } },
-        h("img", {
-          src: "https://loremflickr.com/1800/1000/dubai,skyline,balcony?lock=812",
-          alt: "",
-          style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }
-        }),
-        h("div", {
-          style: {
-            position: "absolute", inset: 0, zIndex: 1,
-            background: "linear-gradient(90deg, rgba(255,255,255,.97) 0%, rgba(255,255,255,.9) 34%, rgba(255,255,255,.42) 56%, rgba(255,255,255,.05) 72%, transparent 88%)"
-          }
-        }),
-        h("div", { className: "container-page", style: { position: "relative", zIndex: 2, height: "100%" } },
-          h("div", { style: { paddingTop: 64, maxWidth: 560 } },
-            h("span", {
-              style: {
-                display: "inline-flex", alignItems: "center", gap: 8, background: "#FCEFC8", color: "var(--goldDeep)",
-                fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase",
-                padding: "8px 14px", borderRadius: 999, marginBottom: 22
-              }
-            }, "Learn Today, Earn Tomorrow"),
-            h("h1", {
-              className: "font-display font-bold",
-              style: { fontSize: "clamp(32px,4.6vw,52px)", lineHeight: 1.08, letterSpacing: "-.01em", margin: 0 }
-            }, "Learn Valuable Skills.", h("br"), h("span", { style: { color: "var(--gold)" } }, "Earn"), " While You Share."),
-            h("p", {
-              className: "text-base",
-              style: { margin: "20px 0 30px", color: "#3C4457", maxWidth: "42ch", lineHeight: 1.6 }
-            }, "Practical products in forex, crypto, affiliate marketing, digital marketing and e-commerce — built for beginners who want real results."),
-            h("div", { className: "flex g3 flex-wrap", style: { marginBottom: 30 } },
-              h(Link, { to: "/products", className: "btn btn-lg", style: { background: "linear-gradient(135deg,var(--gold),var(--goldDeep))", color: "#231701", fontWeight: 700 } },
-                h(Icon, { name: "bag", size: 17 }), " Browse Products"),
-              h(Link, { to: "/signup", className: "btn btn-lg", style: { background: "#fff", border: "1px solid var(--border)", color: "var(--ink)", fontWeight: 700 } },
-                h(Icon, { name: "user", size: 17 }), " Create Free Account")
-            ),
-            h("div", { className: "flex items-center g3" },
-              h("div", { style: { display: "flex" } },
-                [32, 45, 12, 25, 5].map((n, i) => h("img", {
-                  key: n,
-                  src: "https://i.pravatar.cc/80?img=" + n,
-                  alt: "",
-                  style: { width: 38, height: 38, borderRadius: "50%", border: "2.5px solid #fff", objectFit: "cover", marginLeft: i === 0 ? 0 : -10 }
-                }))
-              ),
-              h("p", { className: "text-sm font-semibold", style: { color: "#3C4457", margin: 0, lineHeight: 1.35 } }, "Join thousands of students", h("br"), "changing their future.")
-            )
-          )
-        )
-      )
-    ),
-    h("section", { className: "container-page", style: { paddingTop: 96 } },
-      h("div", { className: "flex items-end justify-between mb8", style: { flexWrap: "wrap", gap: 14 } },
-        h("h2", { className: "font-display font-bold", style: { fontSize: "clamp(24px,3vw,32px)" } }, "Popular Products"),
-        h(Link, { to: "/products", className: "font-bold text-sm flex items-center g2", style: { color: "var(--goldDeep)" } }, "View all products", h(Icon, { name: "arrowRight", size: 15 }))
-      ),
-      h("div", { className: "grid grid-4 g6", style: { paddingBottom: 40 } },
-        products.map(p => h(ProductTeaser, { key: p.slug, ...p }))
-      )
-    ),
-    h("section", { className: "container-page py10" },
-      h("div", { className: "grid grid-3 g6" }, BENEFITS.map(b => h(BenefitCard, { key: b.title, ...b })))),
-    h("section", { className: "container-page py10", style: { borderTop: "1px solid var(--border)" } },
+    h("section", { style: { position: "relative" } },
+      h(HomeNav, { path: "/" }),
+      h(LandingBackdrop, { overlay: "linear-gradient(90deg, rgba(5,20,45,.85) 0%, rgba(5,20,45,.55) 45%, rgba(5,20,45,.1) 80%), linear-gradient(180deg, rgba(5,20,45,.45), transparent 30%)" },
+        h("div", { className: "container-page", style: { paddingTop: 150, paddingBottom: narrow ? 90 : 70, minHeight: narrow ? 560 : 520 } },
+          h("p", { style: { color: "#fff", letterSpacing: ".28em", fontSize: 13, fontWeight: 500, marginBottom: 18 } }, "LEARN  |  GROW  |  EARN"),
+          h("h1", { className: "font-display font-bold", style: { color: "#fff", fontSize: "clamp(34px,5.6vw,58px)", lineHeight: 1.08, margin: 0 } },
+            "Learn Valuable Skills.", h("br"), h("span", { style: { color: "#2D8BFF" } }, "Earn While You Share.")),
+          h("p", { style: { color: "#fff", fontSize: 18, lineHeight: 1.6, maxWidth: 520, margin: "22px 0 30px", opacity: .95 } }, "Practical products in forex, crypto, affiliate marketing, digital marketing and e-commerce — built for beginners who want real results."),
+          h("div", { className: "flex flex-wrap", style: { gap: 12 } },
+            h(Link, { to: "/products", style: { ...bigBtn, background: LANDING_BLUE, color: "#fff" } }, "Browse Products", h(Icon, { name: "arrowRight", size: 17 })),
+            h(Link, { to: "/shop", style: { ...bigBtn, background: "#fff", color: "#0B2A55" } }, h(Icon, { name: "bag", size: 17 }), "Shop"),
+            h(Link, { to: "/signup", style: { ...bigBtn, border: "1.5px solid #fff", color: "#fff", background: "rgba(255,255,255,.06)" } }, h(Icon, { name: "user", size: 17 }), "Create Free Account")),
+          !narrow && h("div", { style: { position: "absolute", right: 40, bottom: 34, textAlign: "right", color: "#fff", fontFamily: "'Segoe Script','Brush Script MT',cursive", fontStyle: "italic", fontSize: 30, lineHeight: 1.15, textShadow: "0 2px 10px rgba(0,0,0,.45)" } },
+            "Better Skills", h("br"), "Bigger Dreams",
+            h("div", { style: { height: 3, width: 140, marginLeft: "auto", marginTop: 6, borderRadius: 3, background: LANDING_BLUE } }))))),
+    h("section", { style: { background: "#fff", borderBottom: "1px solid var(--border)" } },
+      h("div", { className: "container-page", style: { padding: "34px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 22 } },
+        LANDING_FEATURES.map(([ic, t, d]) => h("div", { key: t, style: { textAlign: "center" } },
+          h("span", { style: { width: 50, height: 50, borderRadius: 999, background: LANDING_BLUE, color: "#fff", display: "inline-grid", placeItems: "center", marginBottom: 12 } }, h(Icon, { name: ic, size: 22 })),
+          h("p", { className: "font-display font-bold", style: { fontSize: 16, color: "var(--ink)" } }, t),
+          h("p", { className: "text-sm muted", style: { marginTop: 4 } }, d))))),
+    h(LandingBackdrop, { overlay: "linear-gradient(90deg, rgba(5,20,45,.8), rgba(5,20,45,.55))" },
+      h("div", { className: "container-page", style: { padding: "56px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 32, alignItems: "center" } },
+        h("div", null,
+          h("p", { style: { color: "#fff", letterSpacing: ".2em", fontSize: 12.5, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 12 } }, h("span", { style: { width: 34, height: 2, background: LANDING_BLUE } }), "POPULAR CATEGORIES"),
+          h("h2", { className: "font-display font-bold", style: { color: "#fff", fontSize: "clamp(28px,4vw,40px)", lineHeight: 1.12, marginBottom: 14 } }, "Explore Our", h("br"), "Top Categories"),
+          h("p", { style: { color: "#fff", fontSize: 16, lineHeight: 1.6, maxWidth: 380, marginBottom: 22, opacity: .95 } }, "Choose from a wide range of products designed to help you learn, grow and earn."),
+          h(Link, { to: "/products", style: { ...bigBtn, background: LANDING_BLUE, color: "#fff" } }, "View All Categories", h(Icon, { name: "arrowRight", size: 16 }))),
+        h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 16 } },
+          catList.map(c => h(LandingCategoryCard, { key: c.id, c }))))),
+    h("section", { className: "container-page", style: { paddingTop: 52, paddingBottom: 12 } },
+      h("div", { className: "flex items-end justify-between", style: { flexWrap: "wrap", gap: 12, marginBottom: 22 } },
+        h("div", null,
+          h("p", { style: { color: LANDING_BLUE, letterSpacing: ".18em", fontSize: 12, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 10 } }, h("span", { style: { width: 28, height: 2, background: LANDING_BLUE } }), "POPULAR PRODUCTS"),
+          h("h2", { className: "font-display font-bold", style: { fontSize: "clamp(26px,3.4vw,34px)" } }, "Best Selling Products")),
+        h(Link, { to: "/products", className: "font-bold text-sm flex items-center g2", style: { color: LANDING_BLUE } }, "View all products", h(Icon, { name: "arrowRight", size: 15 }))),
+      prods === null ? h(CatalogLoading, { label: "Loading products…", height: 200 })
+        : prods.length === 0 ? h("p", { className: "text-sm muted" }, "Products are on the way. Check back shortly.")
+        : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 18, paddingBottom: 30 } },
+            prods.map((p, i) => h(LandingProductCard, { key: p.id, p, badge: i === 0 ? "Best Seller" : i === 1 ? "Popular" : null })))),
+    h(HomeShopBanner, null),
+    h("section", { className: "container-page py10", style: { borderTop: "1px solid var(--border)", marginTop: 40 } },
       h("h2", { className: "text-xl font-bold text-center mb2" }, "How it works"),
       h("p", { className: "muted text-sm text-center mb8", style: { maxWidth: 480, margin: "0 auto 32px" } }, "From your first lesson to your first recommendation, in three simple steps."),
       h("div", { className: "grid grid-3 g6" }, HOW_IT_WORKS_STEPS.map((s, i) => h(HowItWorksStep, { key: s.title, ...s, index: i })))));
@@ -8207,7 +8330,8 @@ function ProductDetails({
         h("span", { className: "flex items-center g2" }, h(Icon, { name: "checkCircle", size: 14, style: { color: "var(--green)" } }), " Lifetime access"),
         product.lessonCount !== undefined && h("span", { className: "flex items-center g2" }, h(Icon, { name: "checkCircle", size: 14, style: { color: "var(--green)" } }), " ", product.lessonCount, " lessons")
       )
-    )
+    ),
+    h(ProductShareCard, { slug: params.id, title: product.title })
   );
 
   const mobileBuyBar = h("div", { className: "hide-desktop card p4 flex items-center justify-between g3", style: { position: "sticky", bottom: 12, marginTop: 24 } },
@@ -8219,6 +8343,8 @@ function ProductDetails({
       ? h("button", { className: "btn btn-primary btn-md", onClick: handleBuyClick }, owned ? "Continue Learning" : "Buy Product")
       : h(Link, { to: "/signup", className: "btn btn-primary btn-md" }, "Sign Up to Buy")
   );
+
+  const mobileShare = h("div", { className: "hide-desktop" }, h(ProductShareCard, { slug: params.id, title: product.title }));
 
   return h("div", { className: "container-page py8" },
     h("div", { className: "product-thumb mb6 relative", style: { background: ACCENT_HEX[product.accent] || ACCENT_HEX.blue, height: 220 } },
@@ -8244,6 +8370,7 @@ function ProductDetails({
       sidebar
     ),
     mobileBuyBar,
+    mobileShare,
     preview && h(LessonPreviewModal, {
       product,
       moduleTitle: preview.module.title,
@@ -9185,27 +9312,56 @@ function NotFound() {
 /* ---------------------------------------------------------------- */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+\d][\d\s-]{7,}$/;
-function CountryPhoneField({ value, onChange, id }) {
+const PHONE_COUNTRIES = [
+  ["GH", "Ghana", "233", "🇬🇭"], ["NG", "Nigeria", "234", "🇳🇬"], ["KE", "Kenya", "254", "🇰🇪"], ["ZA", "South Africa", "27", "🇿🇦"],
+  ["CI", "Côte d'Ivoire", "225", "🇨🇮"], ["TG", "Togo", "228", "🇹🇬"], ["BJ", "Benin", "229", "🇧🇯"], ["BF", "Burkina Faso", "226", "🇧🇫"],
+  ["SN", "Senegal", "221", "🇸🇳"], ["CM", "Cameroon", "237", "🇨🇲"], ["TZ", "Tanzania", "255", "🇹🇿"], ["UG", "Uganda", "256", "🇺🇬"],
+  ["RW", "Rwanda", "250", "🇷🇼"], ["ZM", "Zambia", "260", "🇿🇲"], ["ZW", "Zimbabwe", "263", "🇿🇼"], ["ET", "Ethiopia", "251", "🇪🇹"],
+  ["EG", "Egypt", "20", "🇪🇬"], ["MA", "Morocco", "212", "🇲🇦"], ["SL", "Sierra Leone", "232", "🇸🇱"], ["LR", "Liberia", "231", "🇱🇷"],
+  ["GM", "Gambia", "220", "🇬🇲"], ["GB", "United Kingdom", "44", "🇬🇧"], ["US", "United States", "1", "🇺🇸"], ["CA", "Canada", "1", "🇨🇦"],
+  ["DE", "Germany", "49", "🇩🇪"], ["FR", "France", "33", "🇫🇷"], ["NL", "Netherlands", "31", "🇳🇱"], ["IT", "Italy", "39", "🇮🇹"],
+  ["ES", "Spain", "34", "🇪🇸"], ["AE", "United Arab Emirates", "971", "🇦🇪"], ["SA", "Saudi Arabia", "966", "🇸🇦"], ["IN", "India", "91", "🇮🇳"],
+  ["PK", "Pakistan", "92", "🇵🇰"], ["CN", "China", "86", "🇨🇳"], ["AU", "Australia", "61", "🇦🇺"], ["BR", "Brazil", "55", "🇧🇷"],
+];
+/* Builds the international number the backend stores: +<dial><national
+   digits without a leading 0>. A number typed with its own +code is kept. */
+function buildInternationalPhone(countryIso, raw) {
+  const text = String(raw || "").trim();
+  if (text.startsWith("+")) return "+" + text.replace(/\D/g, "");
+  const c = PHONE_COUNTRIES.find(x => x[0] === countryIso) || PHONE_COUNTRIES[0];
+  const national = text.replace(/\D/g, "").replace(/^0+/, "");
+  return "+" + c[2] + national;
+}
+function CountryPhoneField({ value, onChange, id, country, onCountryChange }) {
+  const c = PHONE_COUNTRIES.find(x => x[0] === country) || PHONE_COUNTRIES[0];
   return h("div", {
     style: { display: "flex", gap: 8 }
   }, h("div", {
     className: "input-field",
     style: {
+      position: "relative",
       display: "flex",
       alignItems: "center",
       gap: 6,
       width: "auto",
       flexShrink: 0,
       color: "var(--ink)",
-      fontWeight: 600,
-      cursor: "default",
-      userSelect: "none"
+      fontWeight: 600
     }
-  }, h("span", { style: { fontSize: 16 } }, "🇬🇭"), h("span", null, "+233"), h(Icon, { name: "chevronDown", size: 14 })),
+  }, h("span", { style: { fontSize: 16 } }, c[3]), h("span", null, "+" + c[2]), h(Icon, { name: "chevronDown", size: 14 }),
+  h("select", {
+    "aria-label": "Country code",
+    value: country,
+    onChange: e => onCountryChange && onCountryChange(e.target.value),
+    style: { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", fontSize: 16 }
+  }, PHONE_COUNTRIES.map(x => h("option", { key: x[0], value: x[0] }, x[3] + " " + x[1] + " (+" + x[2] + ")")))),
   h("input", {
     id: id,
+    name: id,
+    autoComplete: "tel-national",
     className: "input-field",
     type: "tel",
+    inputMode: "tel",
     placeholder: "20 123 4567",
     value: value,
     onChange: onChange
@@ -9235,6 +9391,8 @@ function Signup() {
     password: "",
     agreeTerms: false
   });
+  const [accountChoice, setAccountChoice] = useState("personal");
+  const [phoneCountry, setPhoneCountry] = useState("GH");
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
   const [errors, setErrors] = useState({});
@@ -9242,7 +9400,7 @@ function Signup() {
   const {
     toast
   } = useToast();
-  const { register } = useAuth();
+  const { register, login } = useAuth();
   const { referrerId, clearReferrer } = useReferral();
   const set = k => e => {
     const v = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -9259,7 +9417,7 @@ function Signup() {
     const er = {};
     if (!form.fullName.trim()) er.fullName = "Enter your full name.";else if (form.fullName.trim().length < 3) er.fullName = "Full name looks too short.";
     if (!form.email.trim()) er.email = "Enter your email address.";else if (!EMAIL_RE.test(form.email.trim())) er.email = "Enter a valid email address.";
-    if (!form.phone.trim()) er.phone = "Enter your phone number.";else if (!PHONE_RE.test(form.phone.trim())) er.phone = "Enter a valid phone number.";
+    if (!form.phone.trim()) er.phone = "Enter your phone number.";else if (!PHONE_RE.test(form.phone.trim()) || buildInternationalPhone(phoneCountry, form.phone).replace(/\D/g, "").length > 15) er.phone = "Enter a valid phone number.";
     if (!form.password) er.password = "Create a password.";else if (form.password.length < 8) er.password = "Password must be at least 8 characters.";
     if (!form.agreeTerms) er.agreeTerms = "You must accept the Terms & Privacy Policy.";
     return er;
@@ -9277,12 +9435,13 @@ function Signup() {
     }
     setSubmitting(true);
     try {
-      const { emailSent } = await register({
+      const { emailSent, verificationRequired } = await register({
         fullName: form.fullName,
         email: form.email,
-        phone: form.phone,
+        phone: buildInternationalPhone(phoneCountry, form.phone),
         password: form.password,
         referralCode: referrerId || undefined,
+        accountType: accountChoice === "creator" ? "CREATOR" : "NORMAL",
       });
       setSubmitting(false);
       // The referral has now been genuinely recorded server-side (a real
@@ -9290,6 +9449,24 @@ function Signup() {
       // stored code so it can't also get attached to some unrelated
       // later purchase on this same device.
       clearReferrer();
+      // Email verification is switched off on the backend (it returns
+      // verificationRequired: false) — there is no email step, so log the
+      // new account straight in and go to the dashboard. If the backend
+      // is an older version that doesn't send this field, it is
+      // undefined here and the original verify-by-email flow below runs.
+      if (verificationRequired === false) {
+        try {
+          await login(form.email.trim().toLowerCase(), form.password);
+          toast({ type: "success", title: "Welcome to Wamton!", description: accountChoice === "creator" ? "Your Creator Store is ready." : "Your account is ready." });
+          navigate(accountChoice === "creator" ? "/creator" : "/dashboard");
+        } catch (loginErr) {
+          // Account exists but the automatic sign-in failed (e.g. a brief
+          // maintenance window) — send them to the normal login page.
+          toast({ type: "info", title: "Account created", description: "Please log in to continue." });
+          navigate("/login");
+        }
+        return;
+      }
       // The backend is honest about whether the verification email
       // actually went out (Resend can fail) — reflect that here instead
       // of always claiming success. Either way, the account is real and
@@ -9434,6 +9611,22 @@ function Signup() {
           onSubmit: onSubmit,
           className: "space-y"
         },
+          h("div", { className: "mb4" },
+            h("p", { className: "label-field" }, "Account type"),
+            h("div", { className: "grid g2", style: { gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" } },
+              [
+                ["personal", "Personal / Agent", "Learn, buy products and earn by promoting them."],
+                ["creator", "Creator Account", "Sell your own products."],
+              ].map(([key, label, desc]) => h("button", {
+                key, type: "button", onClick: () => setAccountChoice(key), "aria-pressed": accountChoice === key,
+                style: {
+                  textAlign: "left", padding: 12, borderRadius: 10, cursor: "pointer",
+                  border: accountChoice === key ? "2px solid var(--accentDeep)" : "1px solid var(--border)",
+                  background: accountChoice === key ? "#EAF3EE" : "#fff"
+                }
+              }, h("span", { className: "font-semibold text-sm", style: { display: "block" } }, label), h("span", { className: "text-xs muted" }, desc)))),
+            accountChoice === "personal" && h("p", { className: "text-xs muted", style: { marginTop: 8 } }, "You become an Agent automatically after your first purchase."),
+            accountChoice === "creator" && h("p", { className: "text-xs muted", style: { marginTop: 8 } }, "Creator accounts sell products and earn from sales. Products are reviewed before going live. Creator accounts don't use referral or agent features.")),
           h(AvatarUpload, {
             previewUrl: avatarPreview,
             onSelect: f => {
@@ -9448,6 +9641,7 @@ function Signup() {
           }),
           h(Input, {
             id: "fullName",
+            autoComplete: "name",
             label: "Full name",
             placeholder: "Enter your full name",
             error: errors.fullName,
@@ -9456,6 +9650,9 @@ function Signup() {
           }),
           h(Input, {
             id: "email",
+            autoComplete: "email",
+            inputMode: "email",
+            autoCapitalize: "none",
             label: "Email",
             type: "email",
             placeholder: "Enter your email address",
@@ -9463,17 +9660,31 @@ function Signup() {
             value: form.email,
             onChange: set("email")
           }),
+          (() => {
+            const at = form.email.indexOf("@");
+            if (at < 1) return null;
+            const typed = form.email.slice(at + 1).toLowerCase();
+            const domains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com"].filter(d => d.startsWith(typed) && d !== typed);
+            if (!domains.length) return null;
+            return h("div", { className: "flex g2 flex-wrap", style: { marginTop: -8 } }, domains.map(d => h("button", {
+              key: d, type: "button", className: "btn btn-secondary btn-sm",
+              onClick: () => setForm(f => ({ ...f, email: f.email.slice(0, at + 1) + d }))
+            }, "@" + d)));
+          })(),
           h("div", null,
             h("label", { htmlFor: "phone", className: "label-field" }, "Phone number"),
             h(CountryPhoneField, {
               id: "phone",
               value: form.phone,
-              onChange: set("phone")
+              onChange: set("phone"),
+              country: phoneCountry,
+              onCountryChange: setPhoneCountry
             }),
             errors.phone && h("p", { className: "text-xs text-red", style: { marginTop: 6 } }, errors.phone)
           ),
           h(PasswordInput, {
             id: "password",
+            autoComplete: "new-password",
             label: "Create password",
             placeholder: "Create a strong password",
             error: errors.password,
@@ -9560,12 +9771,11 @@ function Login() {
     e.preventDefault();
     setStatus("loading");
     try {
-      // POST /auth/login — the backend only accepts an email, not a phone
-      // number (src/validators/auth.validator.js loginSchema).
-      await login(form.identifier.trim().toLowerCase(), form.password);
+      // POST /auth/login — accepts an email OR a phone number.
+      const res = await login(form.identifier.trim().toLowerCase(), form.password);
       setStatus("idle");
       toast({ type: "success", title: "Welcome back!" });
-      navigate("/dashboard");
+      navigate(res && res.user && res.user.accountType === "CREATOR" ? "/creator" : "/dashboard");
     } catch (err) {
       const msg = String(err.message || "").toLowerCase();
       if (msg.includes("suspended")) setStatus("suspended");
@@ -9593,7 +9803,7 @@ function Login() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "alertTriangle",
     size: 16
-  }), /*#__PURE__*/React.createElement("span", null, "That email and password combination doesn't match our records.")), status === "unverified" && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("span", null, "That email/phone and password combination doesn't match our records.")), status === "unverified" && /*#__PURE__*/React.createElement("div", {
     className: "flex items-start g2 text-sm mb5",
     style: {
       border: "1px solid #fde68a",
@@ -9639,9 +9849,10 @@ function Login() {
     className: "space-y"
   }, /*#__PURE__*/React.createElement(Input, {
     id: "identifier",
-    label: "Email address",
-    placeholder: "you@example.com",
-    type: "email",
+    label: "Email or phone number",
+    placeholder: "you@example.com or 08012345678",
+    type: "text",
+    autoComplete: "username",
     value: form.identifier,
     onChange: set("identifier")
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -9657,6 +9868,7 @@ function Login() {
     className: "text-xs font-semibold text-blue"
   }, "Forgot password?")), /*#__PURE__*/React.createElement(PasswordInput, {
     id: "password",
+    autoComplete: "current-password",
     placeholder: "••••••••",
     value: form.password,
     onChange: set("password")
@@ -11612,6 +11824,14 @@ function matchRoute(rawPath) {
       id: path.slice("/dashboard/learning/".length)
     }
   };
+  if (path.startsWith("/shop/p/") && path !== "/shop/p/") return {
+    name: "shop-product",
+    params: { slug: decodeURIComponent(path.slice("/shop/p/".length)) }
+  };
+  if (path.startsWith("/creator/products/") && path !== "/creator/products/") return {
+    name: "creator-product",
+    params: { id: path.slice("/creator/products/".length) }
+  };
   if (path.startsWith("/checkout/") && path !== "/checkout/") return {
     name: "checkout",
     params: {
@@ -11635,6 +11855,756 @@ function matchRoute(rawPath) {
     params: {}
   };
 }
+/* ================================================================== */
+/* Creator Store — Creator Studio (accountType CREATOR only).          */
+/* Talks to /creator/* (src/routes/creator.routes.js). Ownership,      */
+/* approval, pricing rules and the platform cut are all enforced by    */
+/* the backend; nothing here decides money or publish state.           */
+/* ================================================================== */
+const CREATOR_LESSON_TYPES = [
+  ["VIDEO", "Video link (YouTube/Vimeo URL)"],
+  ["TEXT", "Text lesson"],
+  ["PDF", "PDF file (downloadable resource)"],
+  ["DOCUMENT", "Document file"],
+  ["AUDIO", "Audio link"],
+  ["EXTERNAL_RESOURCE", "External link"],
+];
+const FILE_LESSON_TYPES = ["PDF", "DOCUMENT"];
+function creatorApprovalBadge(c) {
+  const s = c.approvalStatus;
+  if (s === "APPROVED") return h(Badge, { accent: "green" }, c.status === "PUBLISHED" ? "Live" : "Approved (unpublished)");
+  if (s === "PENDING") return h(Badge, { accent: "gold" }, "Waiting for review");
+  if (s === "REJECTED") return h(Badge, { accent: "red" }, "Rejected");
+  return h(Badge, { accent: "blue" }, "Draft");
+}
+async function uploadCreatorFile(file, folder) {
+  const token = getAuthToken();
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("folder", folder);
+  const res = await fetch(API_BASE + "/creator/uploads", { method: "POST", headers: token ? { Authorization: "Bearer " + token } : {}, body: fd });
+  let body = null;
+  try { body = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((body && body.message) || "Upload failed.");
+  return body.data.url;
+}
+function useCreatorGuard() {
+  const { isLoggedIn, authLoading, user } = useAuth();
+  const ok = !!(isLoggedIn && user && user.accountType === "CREATOR");
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isLoggedIn) navigate("/login");
+    else if (!ok) navigate("/dashboard");
+  }, [authLoading, isLoggedIn, ok]);
+  return { ok, authLoading };
+}
+function CreatorLinkRow({ slug, live }) {
+  const { toast } = useToast();
+  const link = buildProductLink(slug, null);
+  const doCopy = async () => {
+    const ok = await copyText(link);
+    toast({ type: ok ? "success" : "error", title: ok ? "Product link copied." : "Couldn't copy the link." });
+  };
+  return h("div", { style: { marginTop: 8 } },
+    h("div", { className: "flex g2", style: { flexWrap: "wrap" } },
+      h("input", { readOnly: true, value: link, className: "input-field font-mono text-xs", style: { flex: 1, minWidth: 180 }, onFocus: e => e.target.select() }),
+      h("button", { type: "button", className: "btn btn-primary btn-sm", onClick: doCopy }, h(Icon, { name: "copy", size: 13 }), "Copy link")),
+    !live && h("p", { className: "text-xs muted", style: { marginTop: 4 } }, "This link starts working once the product is approved and live."),
+    live && h("div", { style: { marginTop: 8 } }, h(ShareButtons, { link, caption: "Check out my product on Wamton." })));
+}
+function CreatorStudio() {
+  const { ok } = useCreatorGuard();
+  const { toast } = useToast();
+  const [state, setState] = useState({ loading: true, error: null, courses: [], earnings: null });
+  const [creating, setCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const load = useCallback(() => {
+    setState(s => ({ ...s, loading: true, error: null }));
+    Promise.all([apiFetch("/creator/courses"), apiFetch("/creator/earnings")])
+      .then(([c, e]) => setState({ loading: false, error: null, courses: c.courses || [], earnings: e }))
+      .catch(err => setState(s => ({ ...s, loading: false, error: err.message })));
+  }, []);
+  useEffect(() => { if (ok) load(); }, [ok, load]);
+  if (!ok) return null;
+  const create = async e => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const r = await apiFetch("/creator/courses", { method: "POST", body: JSON.stringify({ title: newTitle.trim(), price: Number(newPrice) }) });
+      navigate("/creator/products/" + r.course.id);
+    } catch (err) {
+      toast({ type: "error", title: "Couldn't create product", description: err.message });
+      setCreating(false);
+    }
+  };
+  const ea = state.earnings;
+  return h("div", { className: "container-page py8" },
+    h("h1", { className: "text-2xl font-bold mb1" }, "Creator Studio"),
+    h("p", { className: "text-sm muted mb6" }, "Create products, submit them for review, and track your sales."),
+    ea && h("div", { className: "grid grid-3 g4 mb6" },
+      h("div", { className: "card p5" }, h("p", { className: "text-xs muted mb1" }, "Store earnings (withdrawable)"), h("p", { className: "font-display font-bold text-2xl" }, formatGHS(ea.earningsBalance))),
+      h("div", { className: "card p5" }, h("p", { className: "text-xs muted mb1" }, "Total earned"), h("p", { className: "font-display font-bold text-2xl" }, formatGHS(ea.totalEarned))),
+      h("div", { className: "card p5" }, h("p", { className: "text-xs muted mb1" }, "Sales"), h("p", { className: "font-display font-bold text-2xl" }, ea.salesCount))),
+    ea && h("div", { className: "mb6" }, h(Link, { to: "/dashboard/withdraw", className: "btn btn-secondary btn-sm" }, "Withdraw earnings"), " ", h(Link, { to: "/dashboard/wallet", className: "btn btn-ghost btn-sm" }, "Wallet")),
+    h("form", { onSubmit: create, className: "card p5 mb6" },
+      h("p", { className: "font-medium mb3" }, "New product"),
+      h("div", { className: "flex g3 flex-wrap", style: { alignItems: "flex-end" } },
+        h("div", { style: { flex: 2, minWidth: 200 } }, h(Input, { id: "np-title", label: "Product title", placeholder: "e.g. Beginner Forex Guide", value: newTitle, onChange: e => setNewTitle(e.target.value) })),
+        h("div", { style: { flex: 1, minWidth: 120 } }, h(Input, { id: "np-price", label: "Price (GH₵)", type: "number", placeholder: "50", value: newPrice, onChange: e => setNewPrice(e.target.value) })),
+        h("button", { type: "submit", className: "btn btn-primary btn-md", disabled: creating || newTitle.trim().length < 2 || !(Number(newPrice) >= 1) }, creating ? "Creating…" : "Create"))),
+    h("h2", { className: "font-semibold mb3" }, "Your products"),
+    state.loading ? h(CatalogLoading, { label: "Loading your products…", height: 120 })
+      : state.error ? h(CatalogError, { title: "Couldn't load your products.", description: state.error, onRetry: load })
+      : !state.courses.length ? h("p", { className: "text-sm muted" }, "You haven't created any products yet.")
+      : h("div", { className: "flex flex-col g3" }, state.courses.map(c =>
+          h("div", { key: c.id, className: "card p4 flex items-center justify-between g3 flex-wrap" },
+            h("div", { style: { minWidth: 0 } },
+              h("p", { className: "font-medium truncate" }, c.title),
+              h("p", { className: "text-xs muted" }, formatGHS(c.price)),
+              c.approvalStatus === "REJECTED" && c.rejectionReason && h("p", { className: "text-xs", style: { color: "#b91c1c", marginTop: 4 } }, "Reason: " + c.rejectionReason),
+              c.slug && h(CreatorLinkRow, { slug: c.slug, live: c.status === "PUBLISHED" })),
+            h("div", { className: "flex items-center g2" },
+              creatorApprovalBadge(c),
+              c.status === "PUBLISHED" && h(Link, { to: "/products/" + c.slug, className: "btn btn-ghost btn-sm" }, "View"),
+              h(Link, { to: "/creator/products/" + c.id, className: "btn btn-secondary btn-sm" }, "Edit"))))));
+}
+function CreatorProductEditor({ params }) {
+  const { ok } = useCreatorGuard();
+  const { toast } = useToast();
+  const [course, setCourse] = useState(null);
+  const [error, setError] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [newModule, setNewModule] = useState("");
+  const load = useCallback(() => {
+    apiFetch("/creator/courses/" + params.id)
+      .then(r => {
+        setCourse(r.course);
+        setForm(f => f || {
+          title: r.course.title || "", shortDescription: r.course.shortDescription || "", description: r.course.description || "",
+          price: String(r.course.price || ""), categoryId: r.course.categoryId || "", thumbnail: r.course.thumbnail || "",
+        });
+      })
+      .catch(err => setError(err.message));
+  }, [params.id]);
+  useEffect(() => { if (ok) { load(); apiFetch("/categories").then(r => setCategories(r.categories || [])).catch(() => {}); } }, [ok, load]);
+  if (!ok) return null;
+  if (error) return h("div", { className: "container-page py8" }, h(CatalogError, { title: "Couldn't load this product.", description: error, onRetry: () => { setError(null); load(); } }));
+  if (!course || !form) return h("div", { className: "container-page py8" }, h(CatalogLoading, { label: "Loading product…", height: 240 }));
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const run = async (fn, okMsg) => {
+    setBusy(true);
+    try { await fn(); if (okMsg) toast({ type: "success", title: okMsg }); load(); }
+    catch (err) { toast({ type: "error", title: "Something went wrong", description: err.message }); }
+    setBusy(false);
+  };
+  const save = () => run(() => apiFetch("/creator/courses/" + course.id, { method: "PATCH", body: JSON.stringify({
+    title: form.title.trim(), shortDescription: form.shortDescription.trim() || undefined, description: form.description.trim() || undefined,
+    price: Number(form.price), categoryId: form.categoryId || undefined,
+    thumbnail: form.thumbnail || undefined, coverImage: form.thumbnail || undefined,
+  }) }), "Saved.");
+  const onThumb = async e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBusy(true);
+    try { const url = await uploadCreatorFile(f, "course-thumbnails"); setForm(x => ({ ...x, thumbnail: url })); toast({ type: "success", title: "Cover uploaded. Press Save to keep it." }); }
+    catch (err) { toast({ type: "error", title: "Upload failed", description: err.message }); }
+    setBusy(false);
+  };
+  const addModule = () => run(async () => { await apiFetch("/creator/courses/" + course.id + "/modules", { method: "POST", body: JSON.stringify({ title: newModule.trim() }) }); setNewModule(""); }, "Module added.");
+  const locked = course.status === "PUBLISHED";
+  const live = course.status === "PUBLISHED";
+  return h("div", { className: "container-page py8", style: { maxWidth: 860 } },
+    h(Link, { to: "/creator", className: "text-xs muted flex items-center g1 mb4" }, h(Icon, { name: "chevronLeft", size: 13 }), " Creator Studio"),
+    h("div", { className: "flex items-center justify-between g3 flex-wrap mb4" },
+      h("h1", { className: "text-2xl font-bold" }, course.title),
+      creatorApprovalBadge(course)),
+    course.approvalStatus === "REJECTED" && course.rejectionReason && h("div", { className: "card p4 mb4", style: { borderColor: "#fecaca", background: "#fef2f2", color: "#b91c1c" } }, "Rejected: " + course.rejectionReason + ". Fix this, then submit again."),
+    course.slug && h("div", { className: "card p5 mb5" }, h("p", { className: "font-medium text-sm" }, "Product link"), h(CreatorLinkRow, { slug: course.slug, live: course.status === "PUBLISHED" })),
+    course.approvalStatus === "PENDING" && h("div", { className: "card p4 mb4 text-sm" }, "Submitted. An admin will review this product before it goes live."),
+    h("div", { className: "card p5 mb5" },
+      h("p", { className: "font-medium mb3" }, "Product details"),
+      h("div", { className: "space-y" },
+        h(Input, { id: "cp-title", label: "Title", value: form.title, onChange: set("title") }),
+        h(Input, { id: "cp-short", label: "Short description", value: form.shortDescription, onChange: set("shortDescription") }),
+        h("div", null, h("label", { className: "label-field", htmlFor: "cp-desc" }, "Description"),
+          h("textarea", { id: "cp-desc", className: "input-field", rows: 5, value: form.description, onChange: set("description") })),
+        h(Input, { id: "cp-price", label: "Price (GH₵)", type: "number", value: form.price, onChange: set("price") }),
+        h("div", null, h("label", { className: "label-field", htmlFor: "cp-cat" }, "Category"),
+          h("select", { id: "cp-cat", className: "input-field", value: form.categoryId, onChange: set("categoryId") },
+            h("option", { value: "" }, "Choose a category"),
+            categories.map(c => h("option", { key: c.id, value: c.id }, c.name)))),
+        h("div", null, h("label", { className: "label-field" }, "Cover image"),
+          form.thumbnail && h("img", { src: form.thumbnail, alt: "", style: { width: 180, borderRadius: 8, marginBottom: 8, display: "block" } }),
+          h("input", { type: "file", accept: "image/*", onChange: onThumb, disabled: busy })),
+        h("p", { className: "text-xs muted" }, "The platform keeps a percentage of each sale; the rest is added to your store earnings automatically."),
+        h("button", { type: "button", className: "btn btn-primary btn-md", onClick: save, disabled: busy || form.title.trim().length < 2 || !(Number(form.price) >= 1) }, "Save details"))),
+    h("div", { className: "card p5 mb5" },
+      h("p", { className: "font-medium mb3" }, "Content"),
+      (course.modules || []).map(m => h(CreatorModuleEditor, { key: m.id, mod: m, reload: load, toast })),
+      h("div", { className: "flex g2 mt3", style: { marginTop: 12 } },
+        h("input", { className: "input-field", style: { flex: 1 }, placeholder: "New module title", value: newModule, onChange: e => setNewModule(e.target.value) }),
+        h("button", { type: "button", className: "btn btn-secondary btn-md", onClick: addModule, disabled: busy || newModule.trim().length < 2 }, "Add module"))),
+    h("div", { className: "flex g3 flex-wrap" },
+      !live && h("button", { type: "button", className: "btn btn-primary btn-lg", disabled: busy || course.approvalStatus === "PENDING", onClick: () => run(() => apiFetch("/creator/courses/" + course.id + "/submit", { method: "POST" }), "Submitted for review.") }, course.approvalStatus === "PENDING" ? "Waiting for review" : "Submit for review"),
+      live && h("button", { type: "button", className: "btn btn-secondary btn-md", disabled: busy, onClick: () => run(() => apiFetch("/creator/courses/" + course.id + "/unpublish", { method: "POST" }), "Product unpublished.") }, "Unpublish"),
+      !live && course.approvalStatus === "APPROVED" && h("button", { type: "button", className: "btn btn-secondary btn-md", disabled: busy, onClick: () => run(() => apiFetch("/creator/courses/" + course.id + "/republish", { method: "POST" }), "Product is live.") }, "Make live again"),
+      live && h(Link, { to: "/products/" + course.slug, className: "btn btn-ghost btn-md" }, "View public page")));
+}
+function CreatorModuleEditor({ mod, reload, toast }) {
+  const [title, setTitle] = useState("");
+  const [type, setType] = useState("VIDEO");
+  const [content, setContent] = useState("");
+  const [isPreview, setIsPreview] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const isFile = FILE_LESSON_TYPES.includes(type);
+  const guard = async fn => { setBusy(true); try { await fn(); reload(); } catch (err) { toast({ type: "error", title: "Something went wrong", description: err.message }); } setBusy(false); };
+  const onFile = async e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBusy(true);
+    try { setContent(await uploadCreatorFile(f, "lesson-materials")); toast({ type: "success", title: "File uploaded." }); }
+    catch (err) { toast({ type: "error", title: "Upload failed", description: err.message }); }
+    setBusy(false);
+  };
+  const addLesson = () => guard(async () => {
+    await apiFetch("/creator/modules/" + mod.id + "/lessons", { method: "POST", body: JSON.stringify({ title: title.trim(), type, content: content.trim() || undefined, isPreview }) });
+    setTitle(""); setContent(""); setIsPreview(false);
+  });
+  return h("div", { style: { border: "1px solid var(--border)", borderRadius: 10, padding: 14, marginBottom: 12 } },
+    h("div", { className: "flex items-center justify-between g2 mb2" },
+      h("p", { className: "font-medium text-sm" }, mod.title),
+      h("button", { type: "button", className: "btn btn-ghost btn-sm text-red", disabled: busy, onClick: () => { if (window.confirm("Delete this module and its lessons?")) guard(() => apiFetch("/creator/modules/" + mod.id, { method: "DELETE" })); } }, "Delete")),
+    (mod.lessons || []).map(l => h("div", { key: l.id, className: "flex items-center justify-between g2 text-sm", style: { padding: "6px 0", borderTop: "1px solid var(--border)" } },
+      h("span", null, l.title, " ", h("span", { className: "muted text-xs" }, "· " + String(l.type || "").toLowerCase(), l.isPreview ? " · free preview" : "")),
+      h("button", { type: "button", className: "btn btn-ghost btn-sm text-red", disabled: busy, onClick: () => guard(() => apiFetch("/creator/lessons/" + l.id, { method: "DELETE" })) }, "Remove"))),
+    h("div", { className: "grid g2", style: { marginTop: 10 } },
+      h("input", { className: "input-field", placeholder: "Lesson title", value: title, onChange: e => setTitle(e.target.value) }),
+      h("select", { className: "input-field", value: type, onChange: e => { setType(e.target.value); setContent(""); } },
+        CREATOR_LESSON_TYPES.map(([v, l]) => h("option", { key: v, value: v }, l))),
+      isFile
+        ? h("div", null, h("input", { type: "file", accept: ".pdf,.doc,.docx,application/pdf", onChange: onFile, disabled: busy }), content && h("p", { className: "text-xs muted", style: { marginTop: 4 } }, "File attached ✓"))
+        : h("textarea", { className: "input-field", rows: type === "TEXT" ? 5 : 2, placeholder: type === "TEXT" ? "Lesson text" : "Paste the link", value: content, onChange: e => setContent(e.target.value) }),
+      h("label", { className: "flex items-center g2 text-xs" }, h("input", { type: "checkbox", checked: isPreview, onChange: e => setIsPreview(e.target.checked) }), "Free preview lesson"),
+      h("button", { type: "button", className: "btn btn-secondary btn-sm", onClick: addLesson, disabled: busy || title.trim().length < 2 }, "Add lesson")));
+}
+
+/* ================================================================== */
+/* Wamton Shop — public physical-goods storefront.                     */
+/* Anyone can browse and order with NO account and NO online payment:  */
+/* the order is saved for the admin to confirm, collect payment for    */
+/* and deliver. Prices, delivery fee and totals are computed by the    */
+/* backend (POST /shop/orders) — the cart below is display-only.       */
+/* ================================================================== */
+const SHOP_CART_KEY = "wamtonShopCart";
+const SHOP_LAST_ORDER_KEY = "wamtonShopLastOrder";
+const ShopCartCtx = createContext(null);
+
+function readShopCart() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(SHOP_CART_KEY) || "[]");
+    return Array.isArray(arr) ? arr.filter(x => x && x.id && x.quantity > 0 && Number.isFinite(Number(x.price))) : [];
+  } catch (e) { return []; }
+}
+function shopMaxQty(stock) {
+  return stock === null || stock === undefined ? 50 : Math.max(0, Math.min(50, stock));
+}
+function ShopCartProvider({ children }) {
+  const [items, setItems] = useState(readShopCart);
+  useEffect(() => { try { localStorage.setItem(SHOP_CART_KEY, JSON.stringify(items)); } catch (e) {} }, [items]);
+  const add = useCallback((p, qty = 1) => setItems(cur => {
+    const max = shopMaxQty(p.stock);
+    if (max <= 0) return cur;
+    const i = cur.findIndex(x => x.id === p.id);
+    if (i >= 0) {
+      const next = cur.slice();
+      next[i] = { ...next[i], price: p.price, stock: p.stock, quantity: Math.min(max, next[i].quantity + qty) };
+      return next;
+    }
+    return cur.concat([{ id: p.id, slug: p.slug, name: p.name, image: p.image || null, price: p.price, stock: p.stock, quantity: Math.min(max, qty) }]);
+  }), []);
+  const setQty = useCallback((id, q) => setItems(cur => cur.flatMap(x => {
+    if (x.id !== id) return [x];
+    if (q <= 0) return [];
+    return [{ ...x, quantity: Math.min(shopMaxQty(x.stock) || 1, q) }];
+  })), []);
+  const remove = useCallback(id => setItems(cur => cur.filter(x => x.id !== id)), []);
+  const clear = useCallback(() => setItems([]), []);
+  const replaceAll = useCallback(next => setItems(next), []);
+  const value = useMemo(() => ({
+    items, add, setQty, remove, clear, replaceAll,
+    count: items.reduce((s, x) => s + x.quantity, 0),
+    subtotal: Math.round(items.reduce((s, x) => s + x.price * x.quantity, 0) * 100) / 100,
+  }), [items, add, setQty, remove, clear, replaceAll]);
+  return h(ShopCartCtx.Provider, { value }, children);
+}
+function useShopCart() { return useContext(ShopCartCtx); }
+
+let shopConfigCache = null;
+function useShopConfig() {
+  const [cfg, setCfg] = useState(shopConfigCache);
+  useEffect(() => {
+    if (shopConfigCache) return undefined;
+    let dead = false;
+    apiFetch("/shop/config").then(r => { shopConfigCache = r.config; if (!dead) setCfg(r.config); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  return cfg;
+}
+function shopWaNumber(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  if (!d) return "";
+  return d.startsWith("0") ? "233" + d.slice(1) : d;
+}
+function shopWhatsappLink(cfg, text) {
+  const n = shopWaNumber(cfg && cfg.whatsappNumber);
+  if (!n) return "";
+  return "https://wa.me/" + n + (text ? "?text=" + encodeURIComponent(text) : "");
+}
+/* What the customer should expect to pay for delivery. The backend
+   re-computes this from the admin's settings when the order is placed. */
+function shopDelivery(cfg, subtotal) {
+  if (!cfg) return { fee: 0, label: "" };
+  const fee = Number(cfg.deliveryFee) || 0;
+  const above = cfg.freeDeliveryAbove;
+  const free = fee === 0 || (above !== null && above !== undefined && subtotal >= above);
+  let label;
+  if (fee === 0) label = "Free delivery";
+  else if (above !== null && above !== undefined) label = free ? "Free delivery" : "Delivery " + formatGHS(fee) + " · free over " + formatGHS(above);
+  else label = "Delivery " + formatGHS(fee);
+  return { fee: free ? 0 : fee, label };
+}
+function shopStoreLink() { return API_BASE + "/shop/share"; }
+function ShopCopyStoreLink() {
+  const { toast } = useToast();
+  return h("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: async () => { const ok = await copyText(shopStoreLink()); toast({ type: ok ? "success" : "error", title: ok ? "Shop link copied." : "Couldn't copy the link." }); } }, h(Icon, { name: "copy", size: 13 }), " Copy shop link");
+}
+function shopProductLink(slug) {
+  // Server-rendered share URL: shows a rich preview in WhatsApp etc., then opens the product.
+  return API_BASE + "/shop/share/" + encodeURIComponent(slug);
+}
+
+const SHOP_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 14 };
+function ShopImage({ src, alt, height = 150 }) {
+  return h("div", { style: { width: "100%", height, background: "#F3F5F2", borderRadius: 10, overflow: "hidden", display: "grid", placeItems: "center", color: "#9aa39b" } },
+    src ? h("img", { src, alt: alt || "", loading: "lazy", style: { width: "100%", height: "100%", objectFit: "cover" } }) : h(Icon, { name: "bag", size: 34 }));
+}
+function ShopStepper({ qty, max, onChange, size = "sm" }) {
+  const btn = { width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "#fff", fontWeight: 700, fontSize: 16, cursor: "pointer" };
+  return h("div", { className: "flex items-center g2" },
+    h("button", { type: "button", "aria-label": "Decrease quantity", style: btn, onClick: () => onChange(qty - 1) }, "−"),
+    h("span", { style: { minWidth: 22, textAlign: "center", fontWeight: 600 } }, qty),
+    h("button", { type: "button", "aria-label": "Increase quantity", style: { ...btn, opacity: qty >= max ? .4 : 1 }, disabled: qty >= max, onClick: () => onChange(qty + 1) }, "+"));
+}
+function ShopProductCard({ p }) {
+  const cart = useShopCart();
+  const { toast } = useToast();
+  const inCart = cart.items.find(x => x.id === p.id);
+  const max = shopMaxQty(p.stock);
+  return h("div", { className: "card", style: { padding: 10, display: "flex", flexDirection: "column", gap: 8, position: "relative" } },
+    p.discountPercent > 0 && h("span", { style: { position: "absolute", top: 14, left: 14, zIndex: 1, background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 7px", borderRadius: 6 } }, "−" + p.discountPercent + "%"),
+    h(Link, { to: "/shop/p/" + p.slug, style: { display: "block" } }, h(ShopImage, { src: p.image, alt: p.name })),
+    p.origin && h("span", { className: "text-xs muted" }, p.origin),
+    h(Link, { to: "/shop/p/" + p.slug, className: "text-sm font-semibold", style: { lineHeight: 1.3 } }, p.name, p.unitLabel ? " · " + p.unitLabel : ""),
+    h("div", { className: "flex items-center g2" },
+      h("span", { className: "font-display font-bold" }, formatGHS(p.price)),
+      p.compareAtPrice && h("span", { className: "text-xs muted", style: { textDecoration: "line-through" } }, formatGHS(p.compareAtPrice))),
+    !p.inStock
+      ? h("span", { className: "text-xs", style: { color: "#b91c1c", fontWeight: 600 } }, "Out of stock")
+      : inCart
+        ? h(ShopStepper, { qty: inCart.quantity, max, onChange: q => cart.setQty(p.id, q) })
+        : h("button", { type: "button", className: "btn btn-primary btn-sm", style: { justifyContent: "center" }, onClick: () => { cart.add(p, 1); toast({ type: "success", title: "Added to cart" }); } }, "Add to cart"),
+    p.stockState === "LOW_STOCK" && p.inStock && h("span", { className: "text-xs", style: { color: "#b45309" } }, "Only " + p.stock + " left"));
+}
+
+let shopCategoriesCache = null;
+function useShopCategories() {
+  const [cats, setCats] = useState(shopCategoriesCache || []);
+  useEffect(() => {
+    let dead = false;
+    apiFetch("/shop/categories").then(r => { shopCategoriesCache = r.categories || []; if (!dead) setCats(shopCategoriesCache); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  return cats;
+}
+function ShopShell({ children, activeCategory, activeKey, initialQuery }) {
+  const cfg = useShopConfig();
+  const cats = useShopCategories();
+  const cart = useShopCart();
+  const [q, setQ] = useState(initialQuery || "");
+  useEffect(() => { setQ(initialQuery || ""); }, [initialQuery]);
+  const chip = (active) => ({ whiteSpace: "nowrap", padding: "7px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, border: "1px solid var(--border)", background: active ? "var(--ink)" : "#fff", color: active ? "#fff" : "var(--ink)" });
+  return h("div", null,
+    cfg && cfg.announcement && h("div", { style: { background: "var(--ink)", color: "#fff", textAlign: "center", fontSize: 13, padding: "8px 14px" } }, cfg.announcement),
+    cfg && cfg.enabled === false && h("div", { style: { background: "#fef3c7", color: "#92400e", textAlign: "center", fontSize: 13, padding: "8px 14px" } }, "The shop isn't taking new orders right now. You can still browse."),
+    h("div", { className: "container-page", style: { paddingTop: 16 } },
+      h("div", { className: "flex items-center g3", style: { flexWrap: "wrap", marginBottom: 12 } },
+        h(Link, { to: "/shop", className: "font-display font-bold text-lg", style: { marginRight: 4 } }, "Wamton Shop"),
+        h("form", { onSubmit: e => { e.preventDefault(); navigate("/shop/browse" + (q.trim() ? "?q=" + encodeURIComponent(q.trim()) : "")); }, style: { flex: 1, minWidth: 180, display: "flex", gap: 8 } },
+          h("input", { className: "input-field", type: "search", name: "q", placeholder: "Search products", value: q, onChange: e => setQ(e.target.value), style: { flex: 1 } }),
+          h("button", { type: "submit", className: "btn btn-secondary btn-md", "aria-label": "Search" }, h(Icon, { name: "search", size: 16 }))),
+        h(Link, { to: "/cart", className: "btn btn-primary btn-md", style: { position: "relative" } }, h(Icon, { name: "bag", size: 16 }), " Cart", cart.count > 0 && h("span", { style: { background: "#fff", color: "var(--ink)", borderRadius: 999, minWidth: 20, height: 20, display: "inline-grid", placeItems: "center", fontSize: 11, fontWeight: 700, marginLeft: 4 } }, cart.count))),
+      h("div", { style: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 18 } },
+        h(Link, { to: "/shop/browse", style: chip(activeKey === "all") }, "All products"),
+        cats.filter(c => !c.comingSoon).map(c => h(Link, { key: c.id, to: "/shop/browse?category=" + c.slug, style: chip(activeCategory === c.slug) }, c.name)),
+        h(Link, { to: "/shop/browse?sale=1", style: chip(activeKey === "sale") }, "On sale"),
+        h(Link, { to: "/track-order", style: chip(activeKey === "track") }, "Track an order"),
+        h("span", { style: { marginLeft: "auto" } }, h(ShopCopyStoreLink, null)))),
+    children);
+}
+function ShopSection({ title, linkTo, linkLabel, children }) {
+  return h("section", { className: "container-page", style: { marginBottom: 36 } },
+    h("div", { className: "flex items-end justify-between mb4", style: { flexWrap: "wrap", gap: 10 } },
+      h("h2", { className: "font-display font-bold", style: { fontSize: 22 } }, title),
+      linkTo && h(Link, { to: linkTo, className: "font-bold text-sm flex items-center g2", style: { color: "var(--goldDeep)" } }, linkLabel || "View all", h(Icon, { name: "arrowRight", size: 14 }))),
+    children);
+}
+function useShopProducts(query) {
+  const [state, setState] = useState({ loading: true, error: null, products: [], total: 0 });
+  useEffect(() => {
+    let dead = false;
+    setState(s => ({ ...s, loading: true, error: null }));
+    apiFetch("/shop/products?" + query)
+      .then(r => { if (!dead) setState({ loading: false, error: null, products: r.products || [], total: r.total || 0 }); })
+      .catch(err => { if (!dead) setState({ loading: false, error: err.message, products: [], total: 0 }); });
+    return () => { dead = true; };
+  }, [query]);
+  return state;
+}
+
+function ShopHome() {
+  const cfg = useShopConfig();
+  const cats = useShopCategories();
+  const deals = useShopProducts("sale=1&limit=8");
+  const popular = useShopProducts("featured=1&limit=10");
+  const wa = shopWhatsappLink(cfg, "Hello! I'd like to order from the Wamton Shop.");
+  return h(ShopShell, { activeKey: "home" },
+    h("section", { className: "container-page", style: { marginBottom: 28 } },
+      h("div", { style: { borderRadius: 18, padding: "36px 24px", background: "linear-gradient(135deg,#EAF3EE,#FAF5E9)", border: "1px solid var(--border)" } },
+        h("h1", { className: "font-display font-bold", style: { fontSize: "clamp(26px,4.5vw,42px)", lineHeight: 1.1, marginBottom: 12 } }, "Everyday essentials,", h("br"), "delivered to your door."),
+        h("p", { className: "text-base muted", style: { maxWidth: 520, marginBottom: 20 } }, "Browse the Wamton Shop and place an order in minutes. No account needed."),
+        h("div", { className: "flex g3 flex-wrap" },
+          h(Link, { to: "/shop/browse", className: "btn btn-primary btn-lg" }, h(Icon, { name: "bag", size: 17 }), " Shop now"),
+          wa && h("a", { href: wa, target: "_blank", rel: "noopener noreferrer", className: "btn btn-secondary btn-lg" }, h(Icon, { name: "phone", size: 17 }), " Order on WhatsApp")))),
+    h("section", { className: "container-page", style: { marginBottom: 28 } },
+      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12 } },
+        [["checkCircle", "No account needed", "Order as a guest in under a minute."], ["shieldCheck", "We confirm every order", "A real person contacts you to confirm."], ["clock", "Track your order", "Check progress any time with your order number."]].map(([ic, t, d]) =>
+          h("div", { key: t, className: "card", style: { padding: 14, display: "flex", gap: 10 } }, h(Icon, { name: ic, size: 20, style: { color: "var(--accentDeep)", flexShrink: 0 } }), h("div", null, h("p", { className: "text-sm font-semibold" }, t), h("p", { className: "text-xs muted" }, d)))))),
+    cats.length > 0 && h(ShopSection, { title: "Shop by category" },
+      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 12 } },
+        cats.map(c => {
+          const inner = [
+            h(ShopImage, { key: "i", src: c.image, alt: c.name, height: 90 }),
+            h("p", { key: "n", className: "text-sm font-semibold", style: { marginTop: 8 } }, c.name),
+            h("p", { key: "c", className: "text-xs muted" }, c.comingSoon ? "Coming soon" : c.productCount + " item" + (c.productCount === 1 ? "" : "s")),
+          ];
+          return c.comingSoon
+            ? h("div", { key: c.id, className: "card", style: { padding: 10, opacity: .6 } }, inner)
+            : h(Link, { key: c.id, to: "/shop/browse?category=" + c.slug, className: "card", style: { padding: 10, display: "block" } }, inner);
+        }))),
+    deals.products.length > 0 && h(ShopSection, { title: "Today's deals", linkTo: "/shop/browse?sale=1", linkLabel: "See all deals" },
+      h("div", { style: SHOP_GRID }, deals.products.map(p => h(ShopProductCard, { key: p.id, p })))),
+    h(ShopSection, { title: "Popular picks", linkTo: "/shop/browse", linkLabel: "View all products" },
+      popular.loading ? h(CatalogLoading, { label: "Loading products…", height: 160 })
+        : popular.error ? h(CatalogError, { title: "Couldn't load products.", description: popular.error, onRetry: () => window.location.reload() })
+        : popular.products.length ? h("div", { style: SHOP_GRID }, popular.products.map(p => h(ShopProductCard, { key: p.id, p })))
+        : h("p", { className: "text-sm muted" }, "New products are coming soon. Check back shortly.")),
+    h("section", { className: "container-page", style: { marginBottom: 36 } },
+      h("h2", { className: "font-display font-bold mb4", style: { fontSize: 22 } }, "How it works"),
+      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14 } },
+        [["1", "Pick your items", "Add what you need to your cart."], ["2", "Place your order", "Tell us where to deliver. No account or card needed."], ["3", "We confirm and deliver", "We contact you to confirm, then bring it to your door."]].map(([n, t, d]) =>
+          h("div", { key: n, className: "card", style: { padding: 16 } }, h("div", { style: { width: 30, height: 30, borderRadius: 999, background: "var(--ink)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 700, marginBottom: 8 } }, n), h("p", { className: "font-semibold text-sm" }, t), h("p", { className: "text-xs muted" }, d))))),
+    cfg && (cfg.phone1 || wa) && h("section", { className: "container-page", style: { marginBottom: 40 } },
+      h("div", { className: "card", style: { padding: 20, textAlign: "center" } },
+        h("p", { className: "font-semibold mb1" }, "Can't find what you need?"),
+        h("p", { className: "text-sm muted mb3" }, "Message or call us and we'll help."),
+        h("div", { className: "flex g3 flex-wrap", style: { justifyContent: "center" } },
+          wa && h("a", { href: wa, target: "_blank", rel: "noopener noreferrer", className: "btn btn-primary btn-md" }, "WhatsApp us"),
+          cfg.phone1 && h("a", { href: "tel:" + cfg.phone1.replace(/\s/g, ""), className: "btn btn-secondary btn-md" }, "Call " + cfg.phone1),
+          cfg.phone2 && h("a", { href: "tel:" + cfg.phone2.replace(/\s/g, ""), className: "btn btn-secondary btn-md" }, "Call " + cfg.phone2)))));
+}
+
+function ShopBrowse({ query }) {
+  const category = query.get("category") || "";
+  const q = query.get("q") || "";
+  const sale = query.get("sale") === "1";
+  const [sort, setSort] = useState(query.get("sort") || "newest");
+  const [page, setPage] = useState(1);
+  const [extra, setExtra] = useState([]);
+  const base = "limit=24&sort=" + sort + (category ? "&category=" + encodeURIComponent(category) : "") + (q ? "&q=" + encodeURIComponent(q) : "") + (sale ? "&sale=1" : "");
+  const filterKey = base;
+  useEffect(() => { setPage(1); setExtra([]); }, [filterKey]);
+  const first = useShopProducts(base + "&page=1");
+  const [more, setMore] = useState({ loading: false, error: null });
+  const all = first.products.concat(extra);
+  const hasMore = !first.loading && all.length < first.total && !sale;
+  const loadMore = () => {
+    const next = page + 1;
+    setMore({ loading: true, error: null });
+    apiFetch("/shop/products?" + base + "&page=" + next)
+      .then(r => { setExtra(e => e.concat(r.products || [])); setPage(next); setMore({ loading: false, error: null }); })
+      .catch(err => setMore({ loading: false, error: err.message }));
+  };
+  const cats = useShopCategories();
+  const catName = category && (cats.find(c => c.slug === category) || {}).name;
+  const title = q ? 'Results for "' + q + '"' : sale ? "On sale" : catName || "All products";
+  return h(ShopShell, { activeCategory: category, activeKey: !category && !sale ? "all" : sale ? "sale" : "", initialQuery: q },
+    h("section", { className: "container-page", style: { marginBottom: 40 } },
+      h("div", { className: "flex items-center justify-between mb4", style: { flexWrap: "wrap", gap: 10 } },
+        h("h1", { className: "font-display font-bold", style: { fontSize: 24 } }, title),
+        h("select", { className: "input-field", style: { width: "auto" }, "aria-label": "Sort", value: sort, onChange: e => setSort(e.target.value) },
+          h("option", { value: "newest" }, "Newest"), h("option", { value: "price_asc" }, "Price: low to high"), h("option", { value: "price_desc" }, "Price: high to low"), h("option", { value: "name" }, "Name"))),
+      first.loading ? h(CatalogLoading, { label: "Loading products…", height: 200 })
+        : first.error ? h(CatalogError, { title: "Couldn't load products.", description: first.error, onRetry: () => window.location.reload() })
+        : !all.length ? h("div", { className: "card", style: { padding: 24, textAlign: "center" } }, h("p", { className: "font-semibold mb1" }, "Nothing found"), h("p", { className: "text-sm muted mb3" }, "Try a different search or category."), h(Link, { to: "/shop/browse", className: "btn btn-secondary btn-md" }, "See all products"))
+        : h("div", { style: SHOP_GRID }, all.map(p => h(ShopProductCard, { key: p.id, p }))),
+      hasMore && h("div", { style: { textAlign: "center", marginTop: 20 } }, h("button", { type: "button", className: "btn btn-secondary btn-md", disabled: more.loading, onClick: loadMore }, more.loading ? "Loading…" : "Load more")),
+      more.error && h("p", { className: "text-sm", style: { color: "#b91c1c", textAlign: "center", marginTop: 8 } }, more.error)));
+}
+
+function ShopProductPage({ params }) {
+  const cart = useShopCart();
+  const { toast } = useToast();
+  const [st, setSt] = useState({ loading: true, error: null, notFound: false, p: null });
+  const [qty, setQty] = useState(1);
+  useEffect(() => {
+    let dead = false;
+    setSt({ loading: true, error: null, notFound: false, p: null });
+    apiFetch("/shop/products/" + encodeURIComponent(params.slug))
+      .then(r => { if (!dead) setSt({ loading: false, error: null, notFound: false, p: r.product }); })
+      .catch(err => { if (!dead) setSt({ loading: false, error: err.status === 404 ? null : err.message, notFound: err.status === 404, p: null }); });
+    return () => { dead = true; };
+  }, [params.slug]);
+  const p = st.p;
+  const max = p ? shopMaxQty(p.stock) : 0;
+  return h(ShopShell, { activeKey: "" },
+    h("section", { className: "container-page", style: { marginBottom: 40 } },
+      h(Link, { to: "/shop/browse", className: "text-xs muted flex items-center g1 mb4" }, h(Icon, { name: "chevronLeft", size: 13 }), " All products"),
+      st.loading ? h(CatalogLoading, { label: "Loading product…", height: 260 })
+        : st.notFound ? h("div", { className: "card", style: { padding: 24, textAlign: "center" } }, h("p", { className: "font-semibold mb2" }, "We couldn't find that product."), h(Link, { to: "/shop/browse", className: "btn btn-primary btn-md" }, "Back to the shop"))
+        : st.error ? h(CatalogError, { title: "Couldn't load this product.", description: st.error, onRetry: () => window.location.reload() })
+        : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 28, alignItems: "start" } },
+            h("div", { style: { position: "relative" } },
+              p.discountPercent > 0 && h("span", { style: { position: "absolute", top: 12, left: 12, zIndex: 1, background: "#dc2626", color: "#fff", fontSize: 12, fontWeight: 700, padding: "4px 9px", borderRadius: 6 } }, "−" + p.discountPercent + "%"),
+              h(ShopImage, { src: p.image, alt: p.name, height: 380 })),
+            h("div", null,
+              p.category && h(Link, { to: "/shop/browse?category=" + p.category.slug, className: "text-xs muted" }, p.category.name),
+              h("h1", { className: "font-display font-bold", style: { fontSize: 26, margin: "4px 0 8px" } }, p.name),
+              h("div", { className: "flex items-center g3 mb3" },
+                h("span", { className: "font-display font-bold", style: { fontSize: 26 } }, formatGHS(p.price)),
+                p.compareAtPrice && h("span", { className: "muted", style: { textDecoration: "line-through" } }, formatGHS(p.compareAtPrice))),
+              h("div", { className: "flex g2 flex-wrap mb3" },
+                p.origin && h(Badge, { accent: "blue" }, p.origin),
+                p.unitLabel && h(Badge, { accent: "gold" }, p.unitLabel),
+                h(Badge, { accent: p.inStock ? "green" : "red" }, !p.inStock ? "Out of stock" : p.stockState === "LOW_STOCK" ? "Only " + p.stock + " left" : "In stock")),
+              p.description && h("p", { className: "text-sm", style: { color: "#3C4457", lineHeight: 1.6, marginBottom: 18, whiteSpace: "pre-line" } }, p.description),
+              p.inStock && h("div", { className: "flex items-center g3 flex-wrap mb3" },
+                h(ShopStepper, { qty, max, onChange: q => setQty(Math.max(1, Math.min(max, q))) }),
+                h("button", { type: "button", className: "btn btn-primary btn-lg", onClick: () => { cart.add(p, qty); toast({ type: "success", title: "Added to cart" }); } }, "Add to cart"),
+                h("button", { type: "button", className: "btn btn-secondary btn-lg", onClick: () => { cart.add(p, qty); navigate("/cart"); } }, "Order now")),
+              h("button", { type: "button", className: "btn btn-ghost btn-sm", onClick: async () => { const ok = await copyText(shopProductLink(p.slug)); toast({ type: ok ? "success" : "error", title: ok ? "Product link copied." : "Couldn't copy the link." }); } }, h(Icon, { name: "copy", size: 13 }), " Copy product link")))));
+}
+
+function ShopCart() {
+  const cart = useShopCart();
+  const cfg = useShopConfig();
+  const { toast } = useToast();
+  const [form, setForm] = useState({ customerName: "", customerPhone: "", customerEmail: "", address: "", city: "", region: "", notes: "" });
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState(null);
+  const [synced, setSynced] = useState(false);
+  const [notices, setNotices] = useState([]);
+  // Refresh prices/stock from the server so the customer sees what they'll
+  // really be charged (the server re-checks everything on submit anyway).
+  const syncKey = cart.items.map(x => x.slug).join("|");
+  useEffect(() => {
+    let dead = false;
+    if (!cart.items.length) { setSynced(true); return undefined; }
+    Promise.all(cart.items.map(it => apiFetch("/shop/products/" + encodeURIComponent(it.slug)).then(r => r.product).catch(err => (err.status === 404 ? "gone" : null))))
+      .then(results => {
+        if (dead) return;
+        const notes = [];
+        const next = [];
+        cart.items.forEach((it, i) => {
+          const fresh = results[i];
+          if (fresh === "gone" || (fresh && !fresh.inStock)) { notes.push(it.name + " is no longer available and was removed."); return; }
+          if (!fresh) { next.push(it); return; }
+          if (fresh.price !== it.price) notes.push(it.name + " price is now " + formatGHS(fresh.price) + ".");
+          const max = shopMaxQty(fresh.stock);
+          if (it.quantity > max) notes.push("Only " + max + " of " + it.name + " left. Quantity updated.");
+          next.push({ ...it, price: fresh.price, stock: fresh.stock, image: fresh.image, name: fresh.name, quantity: Math.min(it.quantity, max) });
+        });
+        if (JSON.stringify(next) !== JSON.stringify(cart.items)) cart.replaceAll(next);
+        setNotices(notes);
+        setSynced(true);
+      });
+    return () => { dead = true; };
+  }, [syncKey]);
+  const set = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); if (errors[k]) setErrors(er => ({ ...er, [k]: undefined })); };
+  const delivery = shopDelivery(cfg, cart.subtotal);
+  const total = Math.round((cart.subtotal + delivery.fee) * 100) / 100;
+  const submit = async e => {
+    e.preventDefault();
+    setServerError(null);
+    const er = {};
+    if (form.customerName.trim().length < 2) er.customerName = "Enter your name.";
+    if (!PHONE_RE.test(form.customerPhone.trim())) er.customerPhone = "Enter a valid phone number.";
+    if (form.customerEmail.trim() && !EMAIL_RE.test(form.customerEmail.trim())) er.customerEmail = "Enter a valid email or leave it blank.";
+    if (form.address.trim().length < 5) er.address = "Enter your delivery address.";
+    if (form.city.trim().length < 2) er.city = "Enter your city or town.";
+    setErrors(er);
+    if (Object.keys(er).length) return;
+    setSubmitting(true);
+    try {
+      const r = await apiFetch("/shop/orders", { method: "POST", body: JSON.stringify({
+        customerName: form.customerName.trim(), customerPhone: form.customerPhone.trim(), customerEmail: form.customerEmail.trim() || undefined,
+        address: form.address.trim(), city: form.city.trim(), region: form.region.trim() || undefined, notes: form.notes.trim() || undefined,
+        items: cart.items.map(x => ({ productId: x.id, quantity: x.quantity })),
+      }) });
+      try { sessionStorage.setItem(SHOP_LAST_ORDER_KEY, JSON.stringify(r.order)); } catch (err) {}
+      cart.clear();
+      navigate("/shop/order-placed");
+    } catch (err) {
+      setServerError(err.message || "We couldn't place your order. Please try again.");
+      toast({ type: "error", title: "Order not placed", description: err.message });
+    }
+    setSubmitting(false);
+  };
+  if (!cart.items.length) {
+    return h(ShopShell, { activeKey: "" }, h("section", { className: "container-page", style: { marginBottom: 40 } },
+      h("div", { className: "card", style: { padding: 28, textAlign: "center" } },
+        h(Icon, { name: "bag", size: 30 }), h("p", { className: "font-semibold", style: { margin: "10px 0 4px" } }, "Your cart is empty"),
+        h("p", { className: "text-sm muted mb3" }, "Add a few things to get started."),
+        h(Link, { to: "/shop/browse", className: "btn btn-primary btn-md" }, "Start shopping"))));
+  }
+  return h(ShopShell, { activeKey: "" },
+    h("section", { className: "container-page", style: { marginBottom: 40 } },
+      h("h1", { className: "font-display font-bold mb4", style: { fontSize: 24 } }, "Your cart"),
+      notices.map((n, i) => h("div", { key: i, className: "card text-sm", style: { padding: 10, marginBottom: 8, background: "#fef3c7", borderColor: "#fde68a", color: "#92400e" } }, n)),
+      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 24, alignItems: "start" } },
+        h("div", { className: "flex flex-col g3" },
+          cart.items.map(it => h("div", { key: it.id, className: "card", style: { padding: 10, display: "flex", gap: 12, alignItems: "center" } },
+            h("div", { style: { width: 70, flexShrink: 0 } }, h(ShopImage, { src: it.image, alt: it.name, height: 70 })),
+            h("div", { style: { flex: 1, minWidth: 0 } },
+              h(Link, { to: "/shop/p/" + it.slug, className: "text-sm font-semibold", style: { display: "block" } }, it.name),
+              h("p", { className: "text-xs muted mb2" }, formatGHS(it.price) + " each"),
+              h(ShopStepper, { qty: it.quantity, max: shopMaxQty(it.stock) || 1, onChange: q => cart.setQty(it.id, q) })),
+            h("div", { style: { textAlign: "right" } },
+              h("p", { className: "font-semibold text-sm" }, formatGHS(it.price * it.quantity)),
+              h("button", { type: "button", className: "btn btn-ghost btn-sm text-red", onClick: () => cart.remove(it.id) }, "Remove"))))),
+        h("form", { onSubmit: submit, className: "card space-y", style: { padding: 18 }, noValidate: true },
+          h("p", { className: "font-semibold" }, "Delivery details"),
+          h(Input, { id: "customerName", label: "Full name", autoComplete: "name", value: form.customerName, onChange: set("customerName"), error: errors.customerName }),
+          h(Input, { id: "customerPhone", label: "Phone number", type: "tel", autoComplete: "tel", placeholder: "e.g. 024 123 4567", value: form.customerPhone, onChange: set("customerPhone"), error: errors.customerPhone, hint: "We'll call or message you on this number to confirm." }),
+          h(Input, { id: "customerEmail", label: "Email (optional)", type: "email", autoComplete: "email", value: form.customerEmail, onChange: set("customerEmail"), error: errors.customerEmail }),
+          h(Input, { id: "address", label: "Delivery address", autoComplete: "street-address", placeholder: "House number, street, landmark", value: form.address, onChange: set("address"), error: errors.address }),
+          h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
+            h(Input, { id: "city", label: "City / town", autoComplete: "address-level2", value: form.city, onChange: set("city"), error: errors.city }),
+            h(Input, { id: "region", label: "Region (optional)", autoComplete: "address-level1", value: form.region, onChange: set("region") })),
+          h("div", null, h("label", { className: "label-field", htmlFor: "notes" }, "Notes (optional)"), h("textarea", { id: "notes", name: "notes", className: "input-field", rows: 2, value: form.notes, onChange: set("notes"), placeholder: "Anything we should know?" })),
+          h("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 12 } },
+            h("div", { className: "flex justify-between text-sm mb1" }, h("span", null, "Subtotal"), h("span", null, formatGHS(cart.subtotal))),
+            h("div", { className: "flex justify-between text-sm mb1" }, h("span", null, "Delivery"), h("span", null, delivery.fee === 0 ? "Free" : formatGHS(delivery.fee))),
+            delivery.label && h("p", { className: "text-xs muted mb2" }, delivery.label),
+            h("div", { className: "flex justify-between font-bold", style: { fontSize: 17 } }, h("span", null, "Total"), h("span", null, formatGHS(total)))),
+          h("p", { className: "text-xs muted" }, "No payment is taken on this page. We confirm your order with you first and agree how you'd like to pay."),
+          serverError && h("div", { className: "text-sm", style: { color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: 10 } }, serverError),
+          h("button", { type: "submit", className: "btn btn-primary btn-lg w-full", style: { justifyContent: "center" }, disabled: submitting || !synced || (cfg && cfg.enabled === false) }, submitting ? "Placing order…" : "Place order"),
+          cfg && cfg.enabled === false && h("p", { className: "text-xs", style: { color: "#92400e" } }, "The shop isn't taking new orders right now.")))));
+}
+
+function shopOrderWhatsappText(order) {
+  const lines = (order.items || []).map(i => "• " + i.quantity + " × " + i.name + " (" + formatGHS(i.lineTotal) + ")");
+  return ["Hello! I just placed an order on the Wamton Shop.", "Order: " + order.orderNumber, ...lines, "Total: " + formatGHS(order.total), "Name: " + order.customerName].join("\n");
+}
+function ShopOrderPlaced() {
+  const cfg = useShopConfig();
+  let order = null;
+  try { order = JSON.parse(sessionStorage.getItem(SHOP_LAST_ORDER_KEY) || "null"); } catch (e) {}
+  const wa = order ? shopWhatsappLink(cfg, shopOrderWhatsappText(order)) : "";
+  if (!order) {
+    return h(ShopShell, { activeKey: "" }, h("section", { className: "container-page", style: { marginBottom: 40 } },
+      h("div", { className: "card", style: { padding: 24, textAlign: "center" } }, h("p", { className: "font-semibold mb2" }, "No recent order to show."), h(Link, { to: "/track-order", className: "btn btn-secondary btn-md" }, "Track an order"))));
+  }
+  return h(ShopShell, { activeKey: "" },
+    h("section", { className: "container-page", style: { marginBottom: 40, maxWidth: 640 } },
+      h("div", { className: "card", style: { padding: 24 } },
+        h("div", { style: { textAlign: "center", marginBottom: 16 } },
+          h(Icon, { name: "checkCircle", size: 40, style: { color: "var(--green)" } }),
+          h("h1", { className: "font-display font-bold", style: { fontSize: 24, margin: "8px 0 4px" } }, "Order received!"),
+          h("p", { className: "text-sm muted" }, "Your order number is"),
+          h("p", { className: "font-mono font-bold", style: { fontSize: 20 } }, order.orderNumber),
+          h("p", { className: "text-xs muted", style: { marginTop: 6 } }, "Save this number and the phone you used. You'll need both to track your order.")),
+        h("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 12 } },
+          order.items.map(i => h("div", { key: i.id, className: "flex justify-between text-sm mb1" }, h("span", null, i.quantity + " × " + i.name), h("span", null, formatGHS(i.lineTotal)))),
+          h("div", { className: "flex justify-between text-sm mb1", style: { marginTop: 8 } }, h("span", null, "Delivery"), h("span", null, order.deliveryFee === 0 ? "Free" : formatGHS(order.deliveryFee))),
+          h("div", { className: "flex justify-between font-bold" }, h("span", null, "Total"), h("span", null, formatGHS(order.total)))),
+        h("p", { className: "text-sm", style: { margin: "14px 0", color: "#3C4457" } }, "We'll contact you on ", h("strong", null, order.customerPhone), " to confirm your order and arrange payment and delivery."),
+        h("div", { className: "flex g3 flex-wrap" },
+          wa && h("a", { href: wa, target: "_blank", rel: "noopener noreferrer", className: "btn btn-primary btn-md" }, "Send this order on WhatsApp"),
+          h(Link, { to: "/track-order?order=" + encodeURIComponent(order.orderNumber), className: "btn btn-secondary btn-md" }, "Track order"),
+          h(Link, { to: "/shop", className: "btn btn-ghost btn-md" }, "Continue shopping")))));
+}
+
+const SHOP_STATUS_STEPS = [["PENDING", "Received"], ["CONFIRMED", "Confirmed"], ["OUT_FOR_DELIVERY", "Out for delivery"], ["DELIVERED", "Delivered"]];
+function ShopTrack({ query }) {
+  const [form, setForm] = useState({ orderNumber: query.get("order") || "", phone: "" });
+  const [st, setSt] = useState({ loading: false, error: null, order: null });
+  const submit = async e => {
+    e.preventDefault();
+    setSt({ loading: true, error: null, order: null });
+    try {
+      const r = await apiFetch("/shop/orders/track?orderNumber=" + encodeURIComponent(form.orderNumber.trim()) + "&phone=" + encodeURIComponent(form.phone.trim()));
+      setSt({ loading: false, error: null, order: r.order });
+    } catch (err) {
+      setSt({ loading: false, error: err.message, order: null });
+    }
+  };
+  const o = st.order;
+  const stepIdx = o ? SHOP_STATUS_STEPS.findIndex(s => s[0] === o.status) : -1;
+  return h(ShopShell, { activeKey: "track" },
+    h("section", { className: "container-page", style: { marginBottom: 40, maxWidth: 640 } },
+      h("h1", { className: "font-display font-bold mb4", style: { fontSize: 24 } }, "Track an order"),
+      h("form", { onSubmit: submit, className: "card space-y", style: { padding: 18, marginBottom: 18 } },
+        h(Input, { id: "orderNumber", label: "Order number", placeholder: "WS-241015-AB12C", value: form.orderNumber, onChange: e => setForm(f => ({ ...f, orderNumber: e.target.value })) }),
+        h(Input, { id: "trackPhone", label: "Phone number used for the order", type: "tel", autoComplete: "tel", value: form.phone, onChange: e => setForm(f => ({ ...f, phone: e.target.value })) }),
+        h("button", { type: "submit", className: "btn btn-primary btn-md", disabled: st.loading || form.orderNumber.trim().length < 4 || form.phone.replace(/\D/g, "").length < 7 }, st.loading ? "Looking…" : "Track order"),
+        st.error && h("p", { className: "text-sm", style: { color: "#b91c1c" } }, st.error)),
+      o && h("div", { className: "card", style: { padding: 18 } },
+        h("p", { className: "font-mono font-bold mb2" }, o.orderNumber),
+        o.status === "CANCELLED"
+          ? h("p", { className: "text-sm font-semibold", style: { color: "#b91c1c" } }, "This order was cancelled.")
+          : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 14 } },
+              SHOP_STATUS_STEPS.map(([key, label], i) => h("div", { key, style: { textAlign: "center" } },
+                h("div", { style: { height: 6, borderRadius: 4, background: i <= stepIdx ? "var(--green)" : "var(--border)", marginBottom: 6 } }),
+                h("span", { className: "text-xs", style: { fontWeight: i === stepIdx ? 700 : 400 } }, label)))),
+        o.items.map(i => h("div", { key: i.id, className: "flex justify-between text-sm mb1" }, h("span", null, i.quantity + " × " + i.name), h("span", null, formatGHS(i.lineTotal)))),
+        h("div", { className: "flex justify-between text-sm", style: { marginTop: 8 } }, h("span", null, "Delivery"), h("span", null, o.deliveryFee === 0 ? "Free" : formatGHS(o.deliveryFee))),
+        h("div", { className: "flex justify-between font-bold mb2" }, h("span", null, "Total"), h("span", null, formatGHS(o.total))),
+        h("p", { className: "text-xs muted" }, "Delivering to " + o.address + ", " + o.city))));
+}
+
+/* The "Shop" block on the landing page — visible to everyone, no login. */
+function HomeShopBanner() {
+  const cfg = useShopConfig();
+  const featured = useShopProducts("featured=1&limit=4");
+  if (cfg && cfg.enabled === false) return null;
+  return h("section", { className: "container-page", style: { paddingTop: 56 } },
+    h("div", { style: { borderRadius: 18, padding: "28px 22px", background: "linear-gradient(135deg,#EAF3EE,#FAF5E9)", border: "1px solid var(--border)" } },
+      h("div", { className: "flex items-center justify-between", style: { flexWrap: "wrap", gap: 16, marginBottom: featured.products.length ? 20 : 0 } },
+        h("div", { style: { maxWidth: 520 } },
+          h("p", { className: "text-xs font-bold", style: { letterSpacing: ".1em", textTransform: "uppercase", color: "var(--goldDeep)", marginBottom: 6 } }, "Wamton Shop"),
+          h("h2", { className: "font-display font-bold", style: { fontSize: "clamp(22px,3vw,30px)", marginBottom: 8 } }, "Shop everyday essentials, delivered to you."),
+          h("p", { className: "text-sm muted" }, "Browse the shop and place an order in minutes. No account needed.")),
+        h("div", { className: "flex g3 flex-wrap" },
+          h(Link, { to: "/shop", className: "btn btn-primary btn-lg" }, h(Icon, { name: "bag", size: 17 }), " Visit the shop"),
+          h(Link, { to: "/track-order", className: "btn btn-secondary btn-lg" }, "Track an order"))),
+      featured.products.length > 0 && h("div", { style: SHOP_GRID }, featured.products.map(p => h(ShopProductCard, { key: p.id, p })))));
+}
+
 function App() {
   const rawPath = useHashPath();
   const path = stripHashQuery(rawPath);
@@ -11669,6 +12639,10 @@ function App() {
     params: match.params
   });else if (match.name === "product-community") page = /*#__PURE__*/React.createElement(ProductCommunity, {
     params: match.params
+  });else if (match.name === "shop-product") page = /*#__PURE__*/React.createElement(ShopProductPage, {
+    params: match.params
+  });else if (match.name === "creator-product") page = /*#__PURE__*/React.createElement(CreatorProductEditor, {
+    params: match.params
   });else if (match.name === "checkout") page = /*#__PURE__*/React.createElement(Checkout, {
     params: match.params
   });else if (match.name === "checkout-callback") page = /*#__PURE__*/React.createElement(CheckoutCallback, {
@@ -11687,6 +12661,24 @@ function App() {
       break;
     case "/products":
       page = /*#__PURE__*/React.createElement(Marketplace, null);
+      break;
+    case "/creator":
+      page = /*#__PURE__*/React.createElement(CreatorStudio, null);
+      break;
+    case "/shop":
+      page = /*#__PURE__*/React.createElement(ShopHome, null);
+      break;
+    case "/shop/browse":
+      page = /*#__PURE__*/React.createElement(ShopBrowse, { query: getHashQuery(rawPath) });
+      break;
+    case "/cart":
+      page = /*#__PURE__*/React.createElement(ShopCart, null);
+      break;
+    case "/shop/order-placed":
+      page = /*#__PURE__*/React.createElement(ShopOrderPlaced, null);
+      break;
+    case "/track-order":
+      page = /*#__PURE__*/React.createElement(ShopTrack, { query: getHashQuery(rawPath) });
       break;
     case "/how-it-works":
       page = /*#__PURE__*/React.createElement(StaticPage, {
@@ -11867,7 +12859,7 @@ function App() {
     }
   }, page), !isBareAuth && !isDashboard && !isCheckout && /*#__PURE__*/React.createElement(Footer, null), isDashboard && /*#__PURE__*/React.createElement(Footer, null), isLoggedIn && !isBareAuth && /*#__PURE__*/React.createElement(MobileBottomNav, { path: path }));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(ErrorBoundary, null, /*#__PURE__*/React.createElement(AuthProvider, null, /*#__PURE__*/React.createElement(OrdersProvider, null, /*#__PURE__*/React.createElement(AgentProvider, null, /*#__PURE__*/React.createElement(WalletProvider, null, /*#__PURE__*/React.createElement(DashboardVisibilityProvider, null, /*#__PURE__*/React.createElement(ReferralProvider, null, /*#__PURE__*/React.createElement(CommunityProvider, null, /*#__PURE__*/React.createElement(CommunityChatProvider, null, /*#__PURE__*/React.createElement(ToastProvider, null, /*#__PURE__*/React.createElement(App, null))))))))))));
+ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(ErrorBoundary, null, /*#__PURE__*/React.createElement(AuthProvider, null, /*#__PURE__*/React.createElement(OrdersProvider, null, /*#__PURE__*/React.createElement(AgentProvider, null, /*#__PURE__*/React.createElement(WalletProvider, null, /*#__PURE__*/React.createElement(DashboardVisibilityProvider, null, /*#__PURE__*/React.createElement(ReferralProvider, null, /*#__PURE__*/React.createElement(CommunityProvider, null, /*#__PURE__*/React.createElement(CommunityChatProvider, null, /*#__PURE__*/React.createElement(ToastProvider, null, /*#__PURE__*/React.createElement(ShopCartProvider, null, /*#__PURE__*/React.createElement(App, null)))))))))))));
 
 // Real service worker registration — required for PWABuilder/Android
 // installability. Feature-detected and wrapped so it never breaks the
