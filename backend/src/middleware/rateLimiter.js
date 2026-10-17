@@ -96,7 +96,36 @@ const chatRateLimiter = rateLimit({
   },
 });
 
+// Public shop checkout: no account is required, so this is the only thing
+// standing between the order form and spam. Keyed by IP.
+const shopOrderRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  ...(sharedStoreFactory ? { store: sharedStoreFactory("shoporder:") } : {}),
+  message: {
+    success: false,
+    message: "Too many orders from this connection. Please try again later or contact us on WhatsApp.",
+  },
+});
+
+// Order tracking looks orders up by number + phone, so it must not be guessable in bulk.
+const shopTrackRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  ...(sharedStoreFactory ? { store: sharedStoreFactory("shoptrack:") } : {}),
+  message: {
+    success: false,
+    message: "Too many lookups. Please try again in a few minutes.",
+  },
+});
+
 module.exports = apiRateLimiter;
 module.exports.apiRateLimiter = apiRateLimiter;
 module.exports.authRateLimiter = authRateLimiter;
 module.exports.chatRateLimiter = chatRateLimiter;
+module.exports.shopOrderRateLimiter = shopOrderRateLimiter;
+module.exports.shopTrackRateLimiter = shopTrackRateLimiter;
