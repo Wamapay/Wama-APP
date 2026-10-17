@@ -10,6 +10,7 @@ jest.mock("../../src/config/env", () => ({
     isProduction: false,
     jwt: { accessExpiresIn: "15m", refreshExpiresIn: "7d" },
     frontendUrl: "https://app.example.com",
+    requireEmailVerification: false,
     email: { resendApiKey: "re_test_key", from: "Learn & Earn <onboarding@resend.dev>" },
   },
 }));
@@ -118,7 +119,57 @@ describe("auth.service", () => {
     });
   });
 
+  describe("register — account types", () => {
+    function setupTx() {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      const txUser = { create: jest.fn().mockResolvedValue({ id: "u1" }) };
+      const txReferral = { create: jest.fn().mockResolvedValue({}) };
+      mockPrisma.$transaction.mockImplementation(async (cb) => cb({ user: txUser, referral: txReferral }));
+      return { txUser, txReferral };
+    }
+
+    it("creates a CREATOR account and ignores any referral code", async () => {
+      const { txUser, txReferral } = setupTx();
+      mockPrisma.agent.findUnique.mockClear();
+      await authService.register({ fullName: "Kofi", email: "k@x.com", password: "pw123456", referralCode: "AGT10001", accountType: "CREATOR" });
+      expect(txUser.create.mock.calls[0][0].data.accountType).toBe("CREATOR");
+      expect(mockPrisma.agent.findUnique).not.toHaveBeenCalled();
+      expect(txReferral.create).not.toHaveBeenCalled();
+    });
+
+    it("defaults to a NORMAL account", async () => {
+      const { txUser } = setupTx();
+      await authService.register({ fullName: "Ama", email: "a@x.com", password: "pw123456" });
+      expect(txUser.create.mock.calls[0][0].data.accountType).toBe("NORMAL");
+    });
+  });
+
   describe("login", () => {
+    describe("login by phone number", () => {
+      it("logs in with a phone number when the password matches", async () => {
+        const u = { id: "user_p", passwordHash: "hashed:pw123456", status: "ACTIVE", role: "USER", emailVerified: false };
+        mockPrisma.$queryRaw = jest.fn().mockResolvedValue([{ id: "user_p" }]);
+        mockPrisma.user.findUnique.mockResolvedValue(u);
+        mockPrisma.user.update.mockResolvedValue(u);
+        const res = await authService.login({ email: "08012345678", password: "pw123456" });
+        expect(res.user.id).toBe("user_p");
+        expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      });
+
+      it("returns the generic error for an unknown phone", async () => {
+        mockPrisma.$queryRaw = jest.fn().mockResolvedValue([]);
+        await expect(authService.login({ email: "08099999999", password: "x" }))
+          .rejects.toMatchObject({ statusCode: 401, message: "Invalid email or password." });
+      });
+
+      it("returns the generic error for a wrong password on a phone", async () => {
+        mockPrisma.$queryRaw = jest.fn().mockResolvedValue([{ id: "user_p" }]);
+        mockPrisma.user.findUnique.mockResolvedValue({ id: "user_p", passwordHash: "hashed:right", status: "ACTIVE" });
+        await expect(authService.login({ email: "+2348012345678", password: "wrong" }))
+          .rejects.toMatchObject({ statusCode: 401 });
+      });
+    });
+
     it("returns a generic error when the email does not exist (never reveals account existence)", async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
@@ -151,17 +202,41 @@ describe("auth.service", () => {
       ).rejects.toMatchObject({ statusCode: 403 });
     });
 
-    it("rejects login for an unverified account", async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
+    describe("email verification switch (REQUIRE_EMAIL_VERIFICATION)", () => {
+      const { config } = require("../../src/config/env");
+      afterEach(() => { config.requireEmailVerification = false; });
+
+      const unverifiedUser = () => ({
         id: "user_1",
         passwordHash: "hashed:correct-password",
         status: "ACTIVE",
         emailVerified: false,
       });
 
-      await expect(
-        authService.login({ email: "jane@example.com", password: "correct-password" })
-      ).rejects.toMatchObject({ statusCode: 403, message: "Please verify your email before logging in." });
+      it("rejects login for an unverified account when verification is required", async () => {
+        config.requireEmailVerification = true;
+        mockPrisma.user.findUnique.mockResolvedValue(unverifiedUser());
+
+        await expect(
+          authService.login({ email: "jane@example.com", password: "correct-password" })
+        ).rejects.toMatchObject({ statusCode: 403, message: "Please verify your email before logging in." });
+      });
+
+      it("lets an unverified account log in when verification is off (default)", async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(unverifiedUser());
+
+        const result = await authService.login({ email: "jane@example.com", password: "correct-password" });
+
+        expect(result.tokens).toBeDefined();
+      });
+
+      it("still rejects a wrong password when verification is off", async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(unverifiedUser());
+
+        await expect(
+          authService.login({ email: "jane@example.com", password: "wrong-password" })
+        ).rejects.toMatchObject({ statusCode: 401 });
+      });
     });
 
     it("Maintenance Mode: blocks a regular USER from logging in", async () => {
@@ -370,15 +445,32 @@ describe("auth.service", () => {
       expect(mockPrisma.emailVerificationToken.create).not.toHaveBeenCalled();
     });
 
-    it("issues a fresh token for a real, unverified account", async () => {
+    it("issues a fresh token for a real, unverified account when verification is required", async () => {
+      const { config } = require("../../src/config/env");
+      config.requireEmailVerification = true;
+      try {
+        const emailService = require("../../src/services/email.service");
+        emailService.sendVerificationEmail.mockResolvedValueOnce({ sent: true });
+        mockPrisma.user.findUnique.mockResolvedValue({ id: "user_1", email: "a@example.com", fullName: "A", emailVerified: false });
+        mockPrisma.emailVerificationToken.create.mockResolvedValue({});
+
+        const result = await authService.resendVerification("a@example.com");
+
+        expect(result.emailSent).toBe(true);
+      } finally {
+        config.requireEmailVerification = false;
+      }
+    });
+
+    it("sends nothing when verification is switched off (no wasted emails)", async () => {
       const emailService = require("../../src/services/email.service");
-      emailService.sendVerificationEmail.mockResolvedValueOnce({ sent: true });
+      emailService.sendVerificationEmail.mockClear();
       mockPrisma.user.findUnique.mockResolvedValue({ id: "user_1", email: "a@example.com", fullName: "A", emailVerified: false });
-      mockPrisma.emailVerificationToken.create.mockResolvedValue({});
 
       const result = await authService.resendVerification("a@example.com");
 
-      expect(result.emailSent).toBe(true);
+      expect(result).toBeNull();
+      expect(emailService.sendVerificationEmail).not.toHaveBeenCalled();
     });
   });
 

@@ -26,8 +26,18 @@ describe("wallet.service.getBalances", () => {
       cashbackBalance: 100.5,
       commissionBalance: 200.25,
       rewardBalance: 50,
+      earningsBalance: 0,
       availableWithdrawalBalance: 350.75,
     });
+  });
+
+  it("includes creator-store earnings in the available withdrawal balance", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: "user_c", cashbackBalance: "0", commissionBalance: "0", rewardBalance: "0", earningsBalance: "80.00",
+    });
+    const balances = await walletService.getBalances("user_c");
+    expect(balances.earningsBalance).toBe(80);
+    expect(balances.availableWithdrawalBalance).toBe(80);
   });
 
   it("404s for an unknown user", async () => {

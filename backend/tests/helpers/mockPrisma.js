@@ -97,6 +97,7 @@ function createPrismaMock() {
         commissionRatePercent: "40",
         verificationThreshold: 20,
         withdrawalFeeRatePercent: "5",
+        creatorFeePercent: "20",
         rewardTiers: [
           { milestone: 10, amount: "50" },
           { milestone: 15, amount: "75" },
