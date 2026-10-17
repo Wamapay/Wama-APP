@@ -67,7 +67,8 @@ async function revokeAllUserRefreshTokens(userId) {
 
 // --- Registration --------------------------------------------------------
 
-async function register({ fullName, email, phone, password, referralCode }) {
+async function register({ fullName, email, phone, password, referralCode, accountType }) {
+  const isCreator = accountType === "CREATOR";
   // Maintenance Mode (Emergency Controls, Part 19) — nobody registers
   // as an admin-tier account through the public signup form, so this
   // blocks unconditionally, no role check needed here.
@@ -82,7 +83,9 @@ async function register({ fullName, email, phone, password, referralCode }) {
   }
 
   let referringAgent = null;
-  if (referralCode) {
+  // Creator accounts are separate from the referral system, so a
+  // referral code is ignored for them.
+  if (referralCode && !isCreator) {
     referringAgent = await referralService.findAgentByReferralCode(referralCode);
   }
 
@@ -96,6 +99,7 @@ async function register({ fullName, email, phone, password, referralCode }) {
         phone,
         passwordHash,
         role: "USER",
+        accountType: isCreator ? "CREATOR" : "NORMAL",
         status: "ACTIVE",
       },
     });
@@ -119,8 +123,35 @@ async function register({ fullName, email, phone, password, referralCode }) {
 
 // --- Login ----------------------------------------------------------------
 
+/**
+ * Find the account for a login identifier: an email, or a phone number.
+ * Phones are stored as typed at signup (no unique constraint, mixed
+ * formats like 0801..., +234801..., 0801 234 5678), so they're matched on
+ * the last 9 digits (so 0801234567, +234801234567 and 801234567 all match). If several accounts share a phone, only the one
+ * whose password matches can log in.
+ */
+async function findLoginUser(identifier, password) {
+  if (identifier.includes("@")) {
+    return prisma.user.findUnique({ where: { email: identifier } });
+  }
+  const digits = identifier.replace(/\D/g, "");
+  const tail = digits.slice(-9);
+  const rows = await prisma.$queryRaw`
+    SELECT "id" FROM "users"
+    WHERE "phone" IS NOT NULL
+      AND regexp_replace("phone", '\D', '', 'g') LIKE ${"%" + tail}
+    LIMIT 5`;
+  for (const row of rows || []) {
+    const candidate = await prisma.user.findUnique({ where: { id: row.id } });
+    if (candidate && (await verifyPassword(password, candidate.passwordHash))) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 async function login({ email, password }) {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await findLoginUser(email, password);
 
   // Constant-shaped failure: never reveal whether the email exists.
   if (!user) {
@@ -152,7 +183,9 @@ async function login({ email, password }) {
   // account gets no tokens at all. This intentionally runs AFTER the
   // password check (so a wrong password never reveals verification
   // status) and BEFORE any token is issued.
-  if (!user.emailVerified) {
+  // Only enforced when REQUIRE_EMAIL_VERIFICATION=true (off by default —
+  // see config/env.js). Wrong-password attempts never reach this line.
+  if (config.requireEmailVerification && !user.emailVerified) {
     throw ApiError.forbidden("Please verify your email before logging in.");
   }
 
@@ -314,6 +347,10 @@ async function issueEmailVerificationToken(user) {
 }
 
 async function resendVerification(email) {
+  // With verification switched off there is nothing to resend — and
+  // sending would just burn emails, so do nothing (same generic
+  // response as an unknown/already-verified account).
+  if (!config.requireEmailVerification) return null;
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || user.emailVerified) {
     // Same generic behavior as forgotPassword: don't reveal account state.

@@ -67,6 +67,9 @@ async function createOrder({ userId, courseId, referralCode }) {
   if (course.status !== "PUBLISHED") {
     throw ApiError.badRequest("This course is not currently available for purchase.");
   }
+  if (course.creatorId && course.creatorId === userId) {
+    throw ApiError.badRequest("You can't buy your own product.");
+  }
   if (course.price === null || course.price === undefined || Number(course.price) <= 0) {
     throw ApiError.badRequest("This course does not have a valid purchasable price.");
   }

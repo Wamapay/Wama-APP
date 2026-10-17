@@ -40,12 +40,14 @@ async function getBalances(userId) {
   const cashback = toDecimal(user.cashbackBalance);
   const commission = toDecimal(user.commissionBalance);
   const reward = toDecimal(user.rewardBalance);
+  const earnings = toDecimal(user.earningsBalance || 0);
 
   return {
     cashbackBalance: toNumber(cashback),
     commissionBalance: toNumber(commission),
     rewardBalance: toNumber(reward),
-    availableWithdrawalBalance: toNumber(cashback.plus(commission).plus(reward)),
+    earningsBalance: toNumber(earnings),
+    availableWithdrawalBalance: toNumber(cashback.plus(commission).plus(reward).plus(earnings)),
   };
 }
 

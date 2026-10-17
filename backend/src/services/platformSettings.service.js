@@ -23,6 +23,7 @@ const DEFAULTS = {
   commissionRatePercent: "40",
   verificationThreshold: 20,
   withdrawalFeeRatePercent: "5",
+  creatorFeePercent: "20",
   rewardTiers: [
     { milestone: 10, amount: "50" },
     { milestone: 15, amount: "75" },
@@ -204,6 +205,14 @@ async function updateSettings(patch, adminId) {
       throw ApiError.badRequest("withdrawalFeeRatePercent must be a number between 0 and 100.");
     }
     data.withdrawalFeeRatePercent = String(v);
+  }
+
+  if (patch.creatorFeePercent !== undefined) {
+    const v = Number(patch.creatorFeePercent);
+    if (!Number.isFinite(v) || v < 0 || v > 100) {
+      throw ApiError.badRequest("creatorFeePercent must be a number between 0 and 100.");
+    }
+    data.creatorFeePercent = String(v);
   }
 
   if (patch.rewardTiers !== undefined) {

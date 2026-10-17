@@ -34,6 +34,7 @@ const BALANCE_FIELD = Object.freeze({
   CASHBACK: "cashbackBalance",
   COMMISSION: "commissionBalance",
   REWARD: "rewardBalance",
+  EARNINGS: "earningsBalance",
 });
 
 function balanceFieldFor(balanceType) {

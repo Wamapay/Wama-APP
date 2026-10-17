@@ -46,7 +46,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 const MAX_ID_ATTEMPTS = 8;
 
-const BALANCE_TYPES = ["CASHBACK", "COMMISSION", "REWARD"];
+const BALANCE_TYPES = ["CASHBACK", "COMMISSION", "REWARD", "EARNINGS"];
 
 function paginationArgs(query) {
   const take = Math.min(parseInt(query.limit, 10) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
@@ -139,7 +139,7 @@ async function createWithdrawal({ userId, amount, balanceType, paymentMethod, pa
   await withdrawalPinService.verifyWithdrawalPin(userId, pin);
 
   if (!BALANCE_TYPES.includes(balanceType)) {
-    throw ApiError.badRequest("Invalid balance type. Must be one of CASHBACK, COMMISSION, REWARD.");
+    throw ApiError.badRequest("Invalid balance type. Must be one of CASHBACK, COMMISSION, REWARD, EARNINGS.");
   }
 
   const decimalAmount = toDecimal(amount);

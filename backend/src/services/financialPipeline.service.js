@@ -32,6 +32,7 @@ const cashbackService = require("./cashback.service");
 const commissionService = require("./commission.service");
 const agentService = require("./agent.service");
 const rewardService = require("./reward.service");
+const creatorService = require("./creator.service");
 
 async function runPurchaseFinancialPipeline(order) {
   // Defense-in-depth idempotency guard: if the COURSE_PURCHASE event for
@@ -59,6 +60,19 @@ async function runPurchaseFinancialPipeline(order) {
       description: `Course purchase — order ${order.orderNumber}`,
       applyBalance: false,
     });
+
+    // Creator-store product: the creator is paid (sale minus platform
+    // fee) and the sale is kept out of the cashback / referral system —
+    // the platform fee is its only revenue, so no further payouts.
+    const course = await tx.course.findUnique({ where: { id: order.courseId } });
+    if (course && course.creatorId) {
+      const creatorSale = await creatorService.awardCreatorSale(tx, order, course);
+      return {
+        cashback: { transaction: null, amount: null },
+        commission: { transaction: null, referral: null, agent: null, amount: null },
+        creatorSale,
+      };
+    }
 
     const cashback = await cashbackService.awardCashback(tx, order);
     const commission = await commissionService.awardCommission(tx, order);

@@ -47,6 +47,12 @@ async function createAgentForUser(userId) {
     return withReferralLink(user.agent);
   }
 
+  // Creator-store accounts are kept separate from the referral system:
+  // no Agent profile, no referral code, no commission.
+  if (user.accountType === "CREATOR") {
+    return null;
+  }
+
   // Sequence number for the human-facing Agent ID. Uses the current Agent
   // count as a starting point and retries forward on collision, which
   // covers races between concurrent qualifying purchases.

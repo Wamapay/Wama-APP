@@ -88,6 +88,10 @@ async function listCourses(query = {}, { isAdmin = false } = {}) {
     where.categoryId = category ? category.id : "__no_match__";
   }
 
+  if (query.creatorId) {
+    where.creatorId = query.creatorId;
+  }
+
   if (query.featured !== undefined) {
     where.featured = Boolean(query.featured);
   }
@@ -106,6 +110,7 @@ async function listCourses(query = {}, { isAdmin = false } = {}) {
       orderBy: sortToOrderBy(query.sort),
       include: {
         category: true,
+        instructor: { select: { id: true, fullName: true } },
         _count: { select: { modules: true, reviews: true, enrollments: true } },
       },
     }),
@@ -189,6 +194,7 @@ async function getCourseBySlug(slug, { isAdmin = false } = {}) {
     instructor: course.instructor
       ? { id: course.instructor.id, fullName: course.instructor.fullName }
       : null,
+    creatorId: course.creatorId || null,
     status: course.status,
     featured: course.featured,
     publishedAt: course.publishedAt,
@@ -292,6 +298,11 @@ async function setCourseStatus(id, status) {
   }
 
   const data = { status };
+  // An admin publishing a creator's product is also approving it.
+  if (status === "PUBLISHED" && course.creatorId) {
+    data.approvalStatus = "APPROVED";
+    data.rejectionReason = null;
+  }
   if (status === "PUBLISHED" && !course.publishedAt) {
     data.publishedAt = new Date();
   }
