@@ -30,6 +30,7 @@ function toPublicUser(user) {
     phone: user.phone,
     profileImage: user.profileImage,
     role: user.role,
+    accountType: user.accountType || "NORMAL",
     status: user.status,
     emailVerified: user.emailVerified,
     phoneVerified: user.phoneVerified,
