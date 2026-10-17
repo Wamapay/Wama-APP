@@ -19,6 +19,8 @@ router.use("/auth", require("./auth.routes"));
 router.use("/users", require("./users.routes"));
 router.use("/agents", require("./agents.routes"));
 router.use("/admin", require("./admin.routes"));
+router.use("/creator", require("./creator.routes"));
+router.use("/shop", require("./shop.routes"));
 
 // Backend Stage 3 — courses, content, purchases & course access.
 router.use("/courses", require("./courses.routes"));

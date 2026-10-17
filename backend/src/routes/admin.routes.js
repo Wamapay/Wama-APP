@@ -36,6 +36,7 @@ const {
   courseIdParamSchema,
   courseListQuerySchema,
 } = require("../validators/course.validator");
+const { rejectCourseSchema } = require("../validators/creator.validator");
 const { createModuleSchema, updateModuleSchema, moduleIdParamSchema, reorderModulesSchema } = require("../validators/module.validator");
 const { createLessonSchema, updateLessonSchema, lessonIdParamSchema, reorderLessonsSchema } = require("../validators/lesson.validator");
 const { orderIdParamSchema, adminOrderListQuerySchema } = require("../validators/order.validator");
@@ -70,6 +71,9 @@ const { PERMISSIONS, ADMIN_ROLES } = require("../config/adminPermissions");
 const router = Router();
 
 router.use(authenticate, requireRole(...ADMIN_ROLES));
+
+// Wamton Shop management (products, categories, orders, delivery settings).
+router.use("/shop", require("./adminShop.routes"));
 
 /** @route GET /api/v1/admin/users */
 router.get("/users", adminController.listUsers);
@@ -112,6 +116,9 @@ router.patch("/courses/:id", validate(updateCourseSchema), adminCourseController
 
 /** @route POST /api/v1/admin/uploads — real file upload (images/PDF only, never video) */
 router.post("/uploads", upload.single("file"), uploadController.uploadFile);
+router.get("/creator-products", adminCourseController.listCreatorProducts);
+router.post("/courses/:id/approve", validate(courseIdParamSchema), adminCourseController.approveCreatorProduct);
+router.post("/courses/:id/reject", validate(rejectCourseSchema), adminCourseController.rejectCreatorProduct);
 router.post("/courses/:id/publish", validate(courseIdParamSchema), adminCourseController.publishCourse);
 router.post("/courses/:id/unpublish", validate(courseIdParamSchema), adminCourseController.unpublishCourse);
 router.post("/courses/:id/archive", validate(courseIdParamSchema), adminCourseController.archiveCourse);
