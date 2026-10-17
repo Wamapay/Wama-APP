@@ -43,6 +43,25 @@ enum Role {
   MARKETING_ADMIN
 }
 
+// Chosen at signup and never changed by the user. NORMAL = ordinary
+// learner/buyer (can become an Agent after a purchase). CREATOR = sells
+// their own courses/digital products; creator accounts have no referral
+// or agent features.
+enum AccountType {
+  NORMAL
+  CREATOR
+}
+
+// Creator-submitted products need admin approval before going live.
+// DRAFT = creator hasn't submitted yet, PENDING = waiting for admin.
+// Admin-created courses are APPROVED by default.
+enum ApprovalStatus {
+  APPROVED
+  DRAFT
+  PENDING
+  REJECTED
+}
+
 enum AccountStatus {
   ACTIVE
   SUSPENDED
@@ -137,6 +156,7 @@ enum TransactionType {
   WITHDRAWAL_REVERSAL
   WITHDRAWAL_FEE
   ADMIN_ADJUSTMENT
+  CREATOR_SALE
 }
 
 enum TransactionStatus {
@@ -151,6 +171,7 @@ enum BalanceType {
   CASHBACK
   COMMISSION
   REWARD
+  EARNINGS
 }
 
 // What a Transaction/Referral is ultimately traceable back to.
@@ -250,6 +271,7 @@ model User {
   phone         String?
   profileImage  String?
   role          Role          @default(USER)
+  accountType   AccountType   @default(NORMAL)
   status        AccountStatus @default(PENDING)
 
   emailVerified Boolean       @default(false)
@@ -308,6 +330,9 @@ model User {
   cashbackBalance   Decimal @default(0) @db.Decimal(14, 2)
   commissionBalance Decimal @default(0) @db.Decimal(14, 2)
   rewardBalance     Decimal @default(0) @db.Decimal(14, 2)
+  // Creator store earnings (sale price minus the platform fee). Only
+  // ever changed by ledger.service.js, like the other balances.
+  earningsBalance   Decimal @default(0) @db.Decimal(14, 2)
 
   agent         Agent?
   orders        Order[]
@@ -325,6 +350,7 @@ model User {
 
   // Courses & content (Backend Stage 3)
   coursesTaught   Course[]         @relation("CourseInstructor")
+  coursesCreated  Course[]         @relation("CourseCreator")
   enrollments     Enrollment[]
   lessonProgress  LessonProgress[]
   uploadedFiles   FileAsset[]      @relation("FileUploader")
@@ -460,6 +486,14 @@ model Course {
   instructorId     String?
   instructor       User?        @relation("CourseInstructor", fields: [instructorId], references: [id])
 
+  // Creator store: set only for products published by a creator account.
+  // null = platform-owned course (admin created). Creator products start
+  // PENDING and only go live once an admin approves them.
+  creatorId        String?
+  creator          User?        @relation("CourseCreator", fields: [creatorId], references: [id])
+  approvalStatus   ApprovalStatus @default(APPROVED)
+  rejectionReason  String?
+
   status           CourseStatus @default(DRAFT)
   featured         Boolean      @default(false)
   publishedAt      DateTime?
@@ -477,6 +511,8 @@ model Course {
   @@index([categoryId])
   @@index([status])
   @@index([featured])
+  @@index([creatorId])
+  @@index([approvalStatus])
   @@map("courses")
 }
 
@@ -966,6 +1002,8 @@ model PlatformSettings {
   commissionRatePercent    Decimal  @default(40) @db.Decimal(5, 2)
   verificationThreshold    Int      @default(20)
   withdrawalFeeRatePercent Decimal  @default(5) @db.Decimal(5, 2)
+  // Share of each creator-store sale the platform keeps.
+  creatorFeePercent        Decimal  @default(20) @db.Decimal(5, 2)
   // Array of {"milestone": number, "amount": string} — same shape as the
   // old static REWARD_TIERS table it replaces.
   rewardTiers              Json
@@ -1082,4 +1120,133 @@ model AdminActivity {
   @@index([adminId])
   @@index([targetType, targetId])
   @@map("admin_activity")
+}
+
+// ------------------------------------------------------------
+// WAMTON SHOP (physical goods, public storefront)
+// Guests can browse and place orders without an account. There is no
+// online payment here: the order is saved for the admin to confirm and
+// collect payment/deliver (optionally over WhatsApp). Prices, delivery
+// fee and totals are ALWAYS computed on the server, never trusted from
+// the browser.
+// ------------------------------------------------------------
+
+enum ShopOrderStatus {
+  PENDING
+  CONFIRMED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+model ShopCategory {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  image       String?
+  position    Int      @default(0)
+  active      Boolean  @default(true)
+  // Shown as a tile marked "Coming soon" with no products yet.
+  comingSoon  Boolean  @default(false)
+
+  products    ShopProduct[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("shop_categories")
+}
+
+model ShopProduct {
+  id             String        @id @default(cuid())
+  name           String
+  slug           String        @unique
+  description    String?
+  image          String?
+  price          Decimal       @db.Decimal(12, 2)
+  // Original price. When higher than `price` the card shows a discount badge.
+  compareAtPrice Decimal?      @db.Decimal(12, 2)
+  // Where it comes from, e.g. "Ghana" (display only).
+  origin         String?
+  // Size / pack text, e.g. "1.4kg" (display only).
+  unitLabel      String?
+  stock          Int           @default(0)
+  trackStock     Boolean       @default(true)
+  featured       Boolean       @default(false)
+  active         Boolean       @default(true)
+
+  categoryId     String?
+  category       ShopCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orderItems     ShopOrderItem[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([categoryId])
+  @@index([active])
+  @@map("shop_products")
+}
+
+model ShopOrder {
+  id            String          @id @default(cuid())
+  orderNumber   String          @unique
+  status        ShopOrderStatus @default(PENDING)
+
+  customerName  String
+  customerPhone String
+  customerEmail String?
+  address       String
+  city          String
+  region        String?
+  notes         String?
+
+  currency      String          @default("GHS")
+  subtotal      Decimal         @db.Decimal(12, 2)
+  deliveryFee   Decimal         @db.Decimal(12, 2)
+  total         Decimal         @db.Decimal(12, 2)
+  // True once cancelled stock has been put back, so it can only happen once.
+  stockRestored Boolean         @default(false)
+
+  items         ShopOrderItem[]
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("shop_orders")
+}
+
+model ShopOrderItem {
+  id        String       @id @default(cuid())
+  orderId   String
+  order     ShopOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String?
+  product   ShopProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  // Snapshots so editing/deleting a product never changes past orders.
+  name      String
+  unitPrice Decimal      @db.Decimal(12, 2)
+  quantity  Int
+  lineTotal Decimal      @db.Decimal(12, 2)
+
+  @@index([orderId])
+  @@map("shop_order_items")
+}
+
+// Single row (id = "default"). Everything the admin can tune about the shop.
+model ShopSettings {
+  id                String   @id @default("default")
+  enabled           Boolean  @default(true)
+  // Flat delivery fee in GHS. 0 = free delivery.
+  deliveryFee       Decimal  @default(0) @db.Decimal(12, 2)
+  // When set and the basket subtotal reaches it, delivery is free.
+  freeDeliveryAbove Decimal? @db.Decimal(12, 2)
+  whatsappNumber    String   @default("")
+  phone1            String   @default("")
+  phone2            String   @default("")
+  announcement      String   @default("")
+  updatedAt         DateTime @updatedAt
+
+  @@map("shop_settings")
 }
