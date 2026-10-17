@@ -49,6 +49,13 @@ const config = {
   // links AND the email-verification link sent via Resend.
   frontendUrl: process.env.FRONTEND_URL || "",
 
+  // Email verification at signup is OFF by default: every signup used to
+  // send a Resend email, which was the platform's main email cost. Set
+  // REQUIRE_EMAIL_VERIFICATION=true to bring back the old behavior
+  // (verification email on signup + login blocked until verified).
+  // Password-reset and data-export emails are unaffected either way.
+  requireEmailVerification: process.env.REQUIRE_EMAIL_VERIFICATION === "true",
+
   // Real transactional email — Resend (see src/services/email.service.js).
   // The API key is server-side only: read here, never logged, never sent
   // to any frontend or API response.
