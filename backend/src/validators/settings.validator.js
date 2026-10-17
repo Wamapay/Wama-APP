@@ -14,6 +14,7 @@ const updateSettingsSchema = z.object({
       commissionRatePercent: z.number().min(0).max(100).optional(),
       verificationThreshold: z.number().int().positive().optional(),
       withdrawalFeeRatePercent: z.number().min(0).max(100).optional(),
+      creatorFeePercent: z.number().min(0).max(100).optional(),
       rewardTiers: z.array(rewardTierSchema).min(1).optional(),
       // Shape-only check here (any string key -> boolean value). Whether
       // a given key is actually a REAL, known feature name is checked in

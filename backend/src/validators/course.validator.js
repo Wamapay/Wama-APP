@@ -64,6 +64,7 @@ const courseListQuerySchema = z.object({
   query: z.object({
     search: z.string().trim().max(200).optional(),
     category: z.string().trim().max(180).optional(),
+    creatorId: z.string().trim().max(60).optional(),
     featured: z
       .enum(["true", "false"])
       .transform((v) => v === "true")

@@ -20,12 +20,25 @@ const registerSchema = z.object({
     phone: z.string().trim().min(7).max(20).optional(),
     password: passwordSchema,
     referralCode: z.string().trim().min(1).max(40).optional(),
+    accountType: z.enum(["NORMAL", "CREATOR"]).optional(),
   }),
 });
 
+// `email` accepts EITHER an email address or a phone number (the field name
+// is kept so existing clients keep working). auth.service.login decides
+// which one it is.
 const loginSchema = z.object({
   body: z.object({
-    email: z.string().trim().toLowerCase().email("Invalid email address"),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(3, "Enter your email or phone number")
+      .max(254)
+      .refine(
+        (v) => (v.includes("@") ? z.string().email().safeParse(v).success : v.replace(/\D/g, "").length >= 7),
+        "Enter a valid email address or phone number"
+      ),
     password: z.string().min(1, "Password is required"),
   }),
 });
