@@ -3,6 +3,7 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/apiResponse");
 const authService = require("../services/auth.service");
+const { config } = require("../config/env");
 const { toPublicUser } = require("../models/user.mapper");
 
 const GENERIC_RESET_MESSAGE =
@@ -11,8 +12,19 @@ const GENERIC_VERIFICATION_MESSAGE =
   "If an unverified account with that email exists, a verification link has been sent.";
 
 const register = asyncHandler(async (req, res) => {
-  const { fullName, email, phone, password, referralCode } = req.body;
-  const user = await authService.register({ fullName, email, phone, password, referralCode });
+  const { fullName, email, phone, password, referralCode, accountType } = req.body;
+  const user = await authService.register({ fullName, email, phone, password, referralCode, accountType });
+
+  // Email verification is off by default (REQUIRE_EMAIL_VERIFICATION) —
+  // no email is sent and the person can log in straight away.
+  if (!config.requireEmailVerification) {
+    return ApiResponse.success(res, {
+      statusCode: 201,
+      message: "Account created successfully.",
+      data: { user: toPublicUser(user), emailSent: false, verificationRequired: false },
+    });
+  }
+
   const { emailSent } = await authService.issueEmailVerificationToken(user);
 
   return ApiResponse.success(res, {
@@ -20,7 +32,7 @@ const register = asyncHandler(async (req, res) => {
     message: emailSent
       ? "Account created successfully. Please check your email to verify your account before logging in."
       : "Account created successfully, but we couldn't send the verification email right now. Use \"Resend verification email\" to try again.",
-    data: { user: toPublicUser(user), emailSent },
+    data: { user: toPublicUser(user), emailSent, verificationRequired: true },
   });
 });
 

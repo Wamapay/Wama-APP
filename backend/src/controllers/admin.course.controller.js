@@ -78,6 +78,26 @@ const updateCourse = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { message: "Course updated", data: { course: toCourseDetail(course) } });
 });
 
+const creatorService = require("../services/creator.service");
+
+const listCreatorProducts = asyncHandler(async (req, res) => {
+  const courses = await creatorService.listForReview({ approvalStatus: req.query.approvalStatus || "PENDING" });
+  return ApiResponse.success(res, {
+    message: "Creator products retrieved",
+    data: { courses: courses.map((c) => ({ ...toCourseDetail(c), creator: c.creator })) },
+  });
+});
+
+const approveCreatorProduct = asyncHandler(async (req, res) => {
+  const course = await creatorService.approveCourse(req.params.id);
+  return ApiResponse.success(res, { message: "Product approved and published", data: { course: toCourseDetail(course) } });
+});
+
+const rejectCreatorProduct = asyncHandler(async (req, res) => {
+  const course = await creatorService.rejectCourse(req.params.id, req.body.reason);
+  return ApiResponse.success(res, { message: "Product rejected", data: { course: toCourseDetail(course) } });
+});
+
 const publishCourse = asyncHandler(async (req, res) => {
   const course = await courseService.setCourseStatus(req.params.id, "PUBLISHED");
   return ApiResponse.success(res, { message: "Course published", data: { course: toCourseDetail(course) } });
@@ -194,6 +214,9 @@ module.exports = {
   getCourse,
   createCourse,
   updateCourse,
+  listCreatorProducts,
+  approveCreatorProduct,
+  rejectCreatorProduct,
   publishCourse,
   unpublishCourse,
   archiveCourse,
