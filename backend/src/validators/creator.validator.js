@@ -12,6 +12,8 @@ const creatorCourseBody = {
   coverImage: z.string().trim().url().optional(),
   price: z.coerce.number().min(1, "Price must be at least 1"),
   categoryId: z.string().trim().min(1).optional(),
+  kind: z.enum(["COURSE", "EBOOK"]).optional(),
+  topics: z.array(z.string().trim().min(1).max(40)).max(15).optional(),
 };
 
 const createCreatorCourseSchema = z.object({ body: z.object(creatorCourseBody).strip() });
@@ -27,6 +29,7 @@ const updateCreatorCourseSchema = z.object({
       coverImage: creatorCourseBody.coverImage,
       price: creatorCourseBody.price.optional(),
       categoryId: z.string().trim().min(1).nullable().optional(),
+      topics: creatorCourseBody.topics,
     })
     .strip()
     .refine((d) => Object.keys(d).length > 0, { message: "At least one field must be provided" }),

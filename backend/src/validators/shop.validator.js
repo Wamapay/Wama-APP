@@ -56,6 +56,16 @@ const trackOrderSchema = z.object({
 
 const idParamSchema = z.object({ params: z.object({ id: z.string().trim().min(1).max(60) }) });
 
+const fieldDef = z.object({
+  key: z.string().trim().min(1).max(40).regex(/^[a-zA-Z][a-zA-Z0-9_]*$/, "Use letters and numbers only for the field key"),
+  label: z.string().trim().min(1).max(60),
+  type: z.enum(["text", "number", "select"]),
+  options: z.array(z.string().trim().min(1).max(60)).max(40).optional(),
+  required: z.boolean().optional(),
+  unit: z.string().trim().max(20).optional(),
+}).strip();
+const fieldsList = z.array(fieldDef).max(30).refine((l) => new Set(l.map((x) => x.key)).size === l.length, "Each field needs a different key");
+
 const categoryBody = {
   name: z.string().trim().min(2).max(80),
   description: optText(500),
@@ -63,6 +73,7 @@ const categoryBody = {
   position: z.coerce.number().int().min(0).max(1000).optional(),
   active: z.boolean().optional(),
   comingSoon: z.boolean().optional(),
+  fields: fieldsList.optional(),
 };
 const createCategorySchema = z.object({ body: z.object(categoryBody).strip() });
 const updateCategorySchema = z.object({
@@ -74,6 +85,8 @@ const productBody = {
   name: z.string().trim().min(2).max(160),
   description: optText(5000),
   image: z.string().trim().url().max(1000).optional().or(z.literal("")),
+  images: z.array(z.string().trim().url().max(1000)).max(8).optional(),
+  attributes: z.record(z.union([z.string().max(300), z.number(), z.boolean(), z.null()])).refine((o) => Object.keys(o).length <= 40, "Too many details").optional(),
   price: money,
   compareAtPrice: money.nullable().optional(),
   origin: optText(60),
