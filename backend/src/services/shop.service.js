@@ -57,6 +57,24 @@ function stockState(p) {
   return "IN_STOCK";
 }
 
+function galleryOf(p) {
+  if (Array.isArray(p.images) && p.images.length) return p.images;
+  return p.image ? [p.image] : [];
+}
+
+/** Readable "label: value" pairs for the product page, in the category's field order. */
+function specsOf(p) {
+  const attrs = p.attributes && typeof p.attributes === "object" ? p.attributes : {};
+  const fields = p.category && Array.isArray(p.category.fields) ? p.category.fields : [];
+  const out = [];
+  for (const fd of fields) {
+    const v = attrs[fd.key];
+    if (v === undefined || v === null || String(v).trim() === "") continue;
+    out.push({ label: fd.label, value: String(v) + (fd.unit && fd.type !== "select" ? " " + fd.unit : "") });
+  }
+  return out;
+}
+
 function toPublicProduct(p) {
   if (!p) return null;
   const price = toNumber(p.price);
@@ -67,7 +85,9 @@ function toPublicProduct(p) {
     slug: p.slug,
     name: p.name,
     description: p.description || "",
-    image: p.image || null,
+    image: galleryOf(p)[0] || null,
+    images: galleryOf(p),
+    specs: specsOf(p),
     price,
     compareAtPrice: onSale ? compareAt : null,
     discountPercent: onSale ? Math.round(((compareAt - price) / compareAt) * 100) : 0,
@@ -91,6 +111,7 @@ function toAdminProduct(p) {
     trackStock: p.trackStock,
     active: p.active,
     categoryId: p.categoryId || null,
+    attributes: p.attributes && typeof p.attributes === "object" ? p.attributes : {},
     createdAt: p.createdAt,
   };
 }
@@ -189,6 +210,7 @@ async function listCategories() {
   return cats.map((c) => ({
     id: c.id, name: c.name, slug: c.slug, description: c.description || "", image: c.image || null,
     comingSoon: !!c.comingSoon, productCount: c._count ? c._count.products : 0,
+    fields: Array.isArray(c.fields) ? c.fields : [],
   }));
 }
 
@@ -333,6 +355,30 @@ async function updateCategory(id, data) {
   return prisma.shopCategory.update({ where: { id }, data: patch });
 }
 
+/** Add the built-in categories that don't exist yet (matched by name). Returns how many were added. */
+async function addDefaultCategories() {
+  const { DEFAULT_SHOP_CATEGORIES } = require("../config/shopDefaults");
+  const existing = await prisma.shopCategory.findMany({ select: { name: true, position: true } });
+  const have = new Set(existing.map((c) => c.name.toLowerCase()));
+  let position = existing.reduce((m, c) => Math.max(m, c.position || 0), -1) + 1;
+  let added = 0;
+  for (const def of DEFAULT_SHOP_CATEGORIES) {
+    if (have.has(def.name.toLowerCase())) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const slug = await uniqueSlug("shopCategory", def.name);
+    // eslint-disable-next-line no-await-in-loop
+    await prisma.shopCategory.create({ data: { name: def.name, slug, description: def.description, fields: def.fields, position: position++ } });
+    added += 1;
+  }
+  return added;
+}
+
+/** First run only: fill an empty shop with the built-in categories. */
+async function seedDefaultCategoriesIfEmpty() {
+  if ((await prisma.shopCategory.count()) > 0) return 0;
+  return addDefaultCategories();
+}
+
 async function deleteCategory(id) {
   const existing = await prisma.shopCategory.findUnique({ where: { id }, include: { _count: { select: { products: true } } } });
   if (!existing) throw ApiError.notFound("Category not found.");
@@ -349,8 +395,50 @@ async function adminListProducts({ q, page = 1, limit = 30 } = {}) {
   return { products: items.map(toAdminProduct), total, page, pageSize: limit };
 }
 
+/** Keep only the category's own fields, coerce numbers, enforce required/select rules. */
+function cleanAttributes(fields, attrs) {
+  const clean = {};
+  const missing = [];
+  for (const fd of fields) {
+    let v = attrs ? attrs[fd.key] : undefined;
+    if (typeof v === "string") v = v.trim();
+    const empty = v === undefined || v === null || v === "";
+    if (empty) { if (fd.required) missing.push(fd.label); continue; }
+    if (fd.type === "number") {
+      const n = Number(v);
+      if (!Number.isFinite(n)) throw ApiError.badRequest(`${fd.label} must be a number.`);
+      v = n;
+    } else if (fd.type === "select" && Array.isArray(fd.options) && fd.options.length && !fd.options.includes(String(v))) {
+      throw ApiError.badRequest(`${fd.label}: choose one of the listed options.`);
+    } else {
+      v = String(v);
+    }
+    clean[fd.key] = v;
+  }
+  if (missing.length) throw ApiError.badRequest(`Please fill in: ${missing.join(", ")}.`);
+  return clean;
+}
+
+async function applyCategoryRules(out, existing) {
+  const categoryId = out.categoryId !== undefined ? out.categoryId : existing && existing.categoryId;
+  const categoryChanged = out.categoryId !== undefined && (!existing || out.categoryId !== existing.categoryId);
+  if (out.attributes === undefined && !categoryChanged && existing) return; // nothing to re-check
+  if (!categoryId) { if (out.attributes !== undefined) out.attributes = {}; return; }
+  const cat = await prisma.shopCategory.findUnique({ where: { id: categoryId } });
+  if (!cat) throw ApiError.badRequest("That category no longer exists.");
+  const fields = Array.isArray(cat.fields) ? cat.fields : [];
+  const source = out.attributes !== undefined ? out.attributes : categoryChanged ? {} : (existing && existing.attributes) || {};
+  out.attributes = cleanAttributes(fields, source);
+}
+
 function productData(data) {
   const out = { ...data };
+  if (out.images !== undefined) {
+    out.images = [...new Set(out.images)].slice(0, 8);
+    out.image = out.images[0] || null;
+  } else if (out.image !== undefined) {
+    out.images = out.image ? [out.image] : [];
+  }
   if (out.image === "") out.image = null;
   if (out.price !== undefined) out.price = toDecimal(out.price).toDecimalPlaces(2).toString();
   if (out.compareAtPrice !== undefined) out.compareAtPrice = out.compareAtPrice === null ? null : toDecimal(out.compareAtPrice).toDecimalPlaces(2).toString();
@@ -359,14 +447,18 @@ function productData(data) {
 
 async function createProduct(data) {
   const slug = await uniqueSlug("shopProduct", data.name);
-  const created = await prisma.shopProduct.create({ data: { ...productData(data), slug }, include: { category: true } });
+  const payload = productData(data);
+  await applyCategoryRules(payload, null);
+  const created = await prisma.shopProduct.create({ data: { ...payload, slug }, include: { category: true } });
   return toAdminProduct(created);
 }
 
 async function updateProduct(id, data) {
   const existing = await prisma.shopProduct.findUnique({ where: { id } });
   if (!existing) throw ApiError.notFound("Product not found.");
-  const updated = await prisma.shopProduct.update({ where: { id }, data: productData(data), include: { category: true } });
+  const payload = productData(data);
+  await applyCategoryRules(payload, existing);
+  const updated = await prisma.shopProduct.update({ where: { id }, data: payload, include: { category: true } });
   return toAdminProduct(updated);
 }
 
@@ -427,7 +519,7 @@ async function updateOrderStatus(id, status) {
 module.exports = {
   slugify, phoneTail, computeDeliveryFee, stockState, STATUS_FLOW,
   getPublicConfig, updateSettings, listCategories, listProducts, getProductBySlug, placeOrder, trackOrder,
-  adminListCategories, createCategory, updateCategory, deleteCategory,
+  adminListCategories, createCategory, updateCategory, deleteCategory, addDefaultCategories, seedDefaultCategoriesIfEmpty,
   adminListProducts, createProduct, updateProduct, deleteProduct,
   adminListOrders, adminGetOrder, updateOrderStatus,
 };

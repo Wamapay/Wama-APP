@@ -19,7 +19,7 @@ const ledger = require("./ledger.service");
 const platformSettings = require("./platformSettings.service");
 const { percentOf, subtract, toDecimal, toNumber } = require("../utils/money");
 
-const EDITABLE_FIELDS = ["title", "description", "shortDescription", "thumbnail", "coverImage", "price", "categoryId", "slug"];
+const EDITABLE_FIELDS = ["title", "description", "shortDescription", "thumbnail", "coverImage", "price", "categoryId", "slug", "topics"];
 
 async function getOwnedCourse(creatorId, courseId) {
   const course = await prisma.course.findUnique({ where: { id: courseId } });

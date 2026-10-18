@@ -195,6 +195,8 @@ async function getCourseBySlug(slug, { isAdmin = false } = {}) {
       ? { id: course.instructor.id, fullName: course.instructor.fullName }
       : null,
     creatorId: course.creatorId || null,
+    kind: course.kind || "COURSE",
+    topics: course.topics || [],
     status: course.status,
     featured: course.featured,
     publishedAt: course.publishedAt,
@@ -243,6 +245,8 @@ async function createCourse(data) {
       instructorId: data.instructorId || null,
       status: data.status || "DRAFT",
       featured: Boolean(data.featured),
+      ...(data.kind ? { kind: data.kind } : {}),
+      ...(Array.isArray(data.topics) ? { topics: data.topics } : {}),
     },
   });
 }
@@ -269,6 +273,8 @@ async function updateCourse(id, updates) {
   if (updates.categoryId !== undefined) data.categoryId = updates.categoryId;
   if (updates.instructorId !== undefined) data.instructorId = updates.instructorId;
   if (updates.featured !== undefined) data.featured = updates.featured;
+  if (updates.kind !== undefined) data.kind = updates.kind;
+  if (updates.topics !== undefined) data.topics = updates.topics;
   if (updates.status !== undefined) data.status = updates.status;
   if (updates.slug !== undefined) {
     data.slug = await generateUniqueSlug(updates.slug, id);
