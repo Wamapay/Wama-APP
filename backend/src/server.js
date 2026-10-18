@@ -11,6 +11,7 @@ const logger = require("./config/logger");
 const { prisma, connectDatabase, disconnectDatabase } = require("./database/client");
 const { runAutoMigrate } = require("./database/autoMigrate");
 const { runAdminBootstrap } = require("./database/adminBootstrap");
+const shopService = require("./services/shop.service");
 
 assertCriticalConfig();
 
@@ -27,6 +28,10 @@ async function start() {
       if (process.env.AUTO_MIGRATE !== "false") {
         try { await runAutoMigrate(prisma, logger); } catch (err) { logger.error(`[migrate] ${err.message}`); }
       }
+      try {
+        const seeded = await shopService.seedDefaultCategoriesIfEmpty();
+        if (seeded) logger.info(`[shop] Added ${seeded} starter categories.`);
+      } catch (err) { logger.error(`[shop] Could not add starter categories: ${err.message}`); }
       try { await runAdminBootstrap(prisma, logger); } catch (err) { logger.error(`[admin] ${err.message}`); }
     } catch (err) {
       logger.error(`[database] Failed to connect: ${err.message}`);
