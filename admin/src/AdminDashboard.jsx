@@ -4810,23 +4810,31 @@ function ShopOrdersTab({ showToast, logAdmin }) {
 }
 
 function ShopProductForm({ initial, categories, onCancel, onSaved, showToast, logAdmin }) {
-  const blank = { name: "", description: "", image: "", price: "", compareAtPrice: "", origin: "", unitLabel: "", stock: "0", trackStock: true, featured: false, active: true, categoryId: "" };
+  const blank = { name: "", description: "", images: [], attributes: {}, price: "", compareAtPrice: "", origin: "", unitLabel: "", stock: "0", trackStock: true, featured: false, active: true, categoryId: "" };
   const [f, setF] = useState(initial ? {
-    ...blank, ...initial, description: initial.description || "", image: initial.image || "", price: String(initial.price ?? ""),
+    ...blank, ...initial, description: initial.description || "",
+    images: (initial.images && initial.images.length ? initial.images : initial.image ? [initial.image] : []),
+    attributes: { ...(initial.attributes || {}) }, price: String(initial.price ?? ""),
     compareAtPrice: initial.compareAtPrice ? String(initial.compareAtPrice) : "", origin: initial.origin || "", unitLabel: initial.unitLabel || "",
     stock: String(initial.stock ?? 0), categoryId: initial.categoryId || initial.category?.id || "",
   } : blank);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+  const selectedCat = categories.find((c) => c.id === f.categoryId);
+  const catFields = Array.isArray(selectedCat?.fields) ? selectedCat.fields : [];
+  const setAttr = (key, value) => setF((x) => ({ ...x, attributes: { ...x.attributes, [key]: value } }));
+  const move = (i, to) => setF((x) => { const a = x.images.slice(); const [it] = a.splice(i, 1); a.splice(to, 0, it); return { ...x, images: a }; });
   const save = (e) => {
     e.preventDefault();
     setError("");
     if (f.name.trim().length < 2) return setError("Enter a product name.");
     if (f.price === "" || Number(f.price) < 0 || Number.isNaN(Number(f.price))) return setError("Enter a valid price.");
     if (f.compareAtPrice !== "" && Number(f.compareAtPrice) <= Number(f.price)) return setError("The old price must be higher than the price to show as a deal.");
+    const missing = catFields.filter((fd) => fd.required && String(f.attributes[fd.key] ?? "").trim() === "").map((fd) => fd.label);
+    if (missing.length) return setError("Please fill in: " + missing.join(", ") + ".");
     const body = {
-      name: f.name.trim(), description: f.description.trim(), image: f.image.trim(), price: Number(f.price),
+      name: f.name.trim(), description: f.description.trim(), images: f.images, attributes: catFields.length ? f.attributes : {}, price: Number(f.price),
       compareAtPrice: f.compareAtPrice === "" ? null : Number(f.compareAtPrice),
       origin: f.origin.trim(), unitLabel: f.unitLabel.trim(), stock: Number(f.stock) || 0,
       trackStock: f.trackStock, featured: f.featured, active: f.active, categoryId: f.categoryId || null,
@@ -4856,10 +4864,42 @@ function ShopProductForm({ initial, categories, onCancel, onSaved, showToast, lo
           </select>
         ))}
       </div>
+      {!categories.length ? <p className="text-xs" style={{ color: "var(--text-soft)" }}>No categories yet. Open the Categories tab and click "Add suggested categories".</p> : null}
+      {catFields.length > 0 && (
+        <div className="rounded-lg p-3 space-y-3" style={{ background: "var(--surface-alt)", border: "1px solid var(--border)" }}>
+          <p className="text-xs font-semibold">{selectedCat.name} details</p>
+          <div className="grid grid-cols-2 gap-3">
+            {catFields.map((fd) => field(fd.label + (fd.required ? " *" : "") + (fd.unit ? " (" + fd.unit + ")" : ""),
+              fd.type === "select" ? (
+                <select className={inputClass} style={inputStyle} value={f.attributes[fd.key] ?? ""} onChange={(e) => setAttr(fd.key, e.target.value)}>
+                  <option value="">Choose…</option>
+                  {(fd.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input className={inputClass} style={inputStyle} type={fd.type === "number" ? "number" : "text"} value={f.attributes[fd.key] ?? ""} onChange={(e) => setAttr(fd.key, e.target.value)} />
+              )
+            ))}
+          </div>
+        </div>
+      )}
       <div>
-        <span className="text-xs font-semibold block mb-1">Image</span>
-        {f.image ? <img src={f.image} alt="" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} /> : null}
-        <FileUploadButton folder="shop" label={f.image ? "REPLACE IMAGE" : "UPLOAD IMAGE"} onUploaded={(url) => setF((x) => ({ ...x, image: url }))} />
+        <span className="text-xs font-semibold block mb-1">Photos ({f.images.length}/8) — the first one is the main photo</span>
+        {f.images.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-2">
+            {f.images.map((url, i) => (
+              <div key={url + i} style={{ width: 96 }}>
+                <img src={url} alt="" style={{ width: 96, height: 96, objectFit: "contain", background: "#fff", borderRadius: 8, border: i === 0 ? "2px solid var(--blue)" : "1px solid var(--border)" }} />
+                <div className="flex justify-between text-[11px] mt-1">
+                  {i > 0 ? <button type="button" onClick={() => move(i, 0)} style={{ color: "var(--blue)" }}>Make main</button> : <span style={{ color: "var(--blue)" }}>Main</span>}
+                  <button type="button" onClick={() => setF((x) => ({ ...x, images: x.images.filter((_, j) => j !== i) }))} style={{ color: "var(--red)" }}>Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {f.images.length < 8 ? (
+          <FileUploadButton key={f.images.length} folder="shop" label={f.images.length ? "ADD ANOTHER PHOTO" : "UPLOAD PHOTO"} onUploaded={(url) => setF((x) => ({ ...x, images: x.images.length < 8 ? x.images.concat([url]) : x.images }))} />
+        ) : <p className="text-xs" style={{ color: "var(--text-soft)" }}>Maximum of 8 photos.</p>}
       </div>
       <div className="flex gap-5 flex-wrap text-sm">
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.trackStock} onChange={set("trackStock")} /> Track stock</label>
@@ -4911,7 +4951,7 @@ function ShopProductsTab({ showToast, logAdmin }) {
           <div className="space-y-2">
             {state.products.map((p) => (
               <div key={p.id} className="card p-3 flex items-center gap-3 flex-wrap">
-                {p.image ? <img src={p.image} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8 }} /> : <div style={{ width: 48, height: 48, borderRadius: 8, background: "var(--border-soft)" }} />}
+                {p.image ? <img src={p.image} alt="" style={{ width: 48, height: 48, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: 8 }} /> : <div style={{ width: 48, height: 48, borderRadius: 8, background: "var(--border-soft)" }} />}
                 <div style={{ flex: 1, minWidth: 160 }}>
                   <p className="font-semibold text-sm">{p.name}{!p.active ? " (hidden)" : ""}{p.featured ? " ★" : ""}</p>
                   <p className="text-xs" style={{ color: "var(--text-soft)" }}>
@@ -4929,10 +4969,71 @@ function ShopProductsTab({ showToast, logAdmin }) {
   );
 }
 
+const fieldKeyFrom = (label, taken) => {
+  const base = String(label || "field").trim().toLowerCase().replace(/[^a-z0-9]+(.)?/g, (_, c) => (c ? c.toUpperCase() : "")).replace(/^[^a-z]+/, "") || "field";
+  let key = base; let n = 2;
+  while (taken.includes(key)) { key = base + n; n += 1; }
+  return key;
+};
+
+function CategoryFieldsEditor({ category, onSaved, showToast, logAdmin }) {
+  const [fields, setFields] = useState(() => (Array.isArray(category.fields) ? category.fields.map((x) => ({ ...x, optionsText: (x.options || []).join(", ") })) : []));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const upd = (i, patch) => setFields((l) => l.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const add = () => setFields((l) => l.concat([{ key: "", label: "", type: "text", required: false, optionsText: "" }]));
+  const save = () => {
+    setError("");
+    const taken = [];
+    const out = [];
+    for (const x of fields) {
+      const label = x.label.trim();
+      if (!label) return setError("Every detail needs a name.");
+      const key = x.key && !taken.includes(x.key) ? x.key : fieldKeyFrom(label, taken);
+      taken.push(key);
+      const def = { key, label, type: x.type, required: !!x.required };
+      if (x.unit && x.unit.trim()) def.unit = x.unit.trim();
+      if (x.type === "select") {
+        def.options = x.optionsText.split(",").map((o) => o.trim()).filter(Boolean);
+        if (!def.options.length) return setError("\"" + label + "\" needs choices separated by commas.");
+      }
+      out.push(def);
+    }
+    setBusy(true);
+    apiFetch("/admin/shop/categories/" + category.id, { method: "PATCH", body: JSON.stringify({ fields: out }) })
+      .then(() => { showToast?.("Details saved for " + category.name + "."); logAdmin?.("Edited fields of shop category " + category.name); onSaved(); })
+      .catch((err) => setError(err.message || "Couldn't save."))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="w-full space-y-2 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+      <p className="text-xs" style={{ color: "var(--text-soft)" }}>These are the details a seller fills in when adding a product in this category.</p>
+      {fields.map((x, i) => (
+        <div key={i} className="flex gap-2 flex-wrap items-center">
+          <input className={inputClass} style={{ ...inputStyle, width: 160 }} placeholder="Name e.g. Storage" value={x.label} onChange={(e) => upd(i, { label: e.target.value })} />
+          <select className={inputClass} style={{ ...inputStyle, width: 110 }} value={x.type} onChange={(e) => upd(i, { type: e.target.value })}>
+            <option value="text">Text</option><option value="number">Number</option><option value="select">Choices</option>
+          </select>
+          {x.type === "select" && <input className={inputClass} style={{ ...inputStyle, width: 220 }} placeholder="Choices: 64GB, 128GB, 256GB" value={x.optionsText} onChange={(e) => upd(i, { optionsText: e.target.value })} />}
+          <input className={inputClass} style={{ ...inputStyle, width: 80 }} placeholder="Unit" value={x.unit || ""} onChange={(e) => upd(i, { unit: e.target.value })} />
+          <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={!!x.required} onChange={(e) => upd(i, { required: e.target.checked })} /> Required</label>
+          <button type="button" onClick={() => setFields((l) => l.filter((_, j) => j !== i))} className="text-xs" style={{ color: "var(--red)" }}>Remove</button>
+        </div>
+      ))}
+      {error ? <p className="text-xs" style={{ color: "var(--red)" }}>{error}</p> : null}
+      <div className="flex gap-2">
+        <button type="button" onClick={add} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--border-soft)" }}>+ Add detail</button>
+        <button type="button" disabled={busy} onClick={save} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>{busy ? "Saving…" : "Save details"}</button>
+      </div>
+    </div>
+  );
+}
+
 function ShopCategoriesTab({ showToast, logAdmin }) {
   const [state, setState] = useState({ loading: true, error: "", categories: [] });
   const [name, setName] = useState("");
   const [comingSoon, setComingSoon] = useState(false);
+  const [openId, setOpenId] = useState(null);
   const load = () => apiFetch("/admin/shop/categories")
     .then((r) => setState({ loading: false, error: "", categories: r.categories || [] }))
     .catch((err) => setState({ loading: false, error: err.message || "Couldn't load categories.", categories: [] }));
@@ -4944,6 +5045,9 @@ function ShopCategoriesTab({ showToast, logAdmin }) {
       .then(() => { showToast?.("Category added."); logAdmin?.("Added shop category: " + name.trim()); setName(""); setComingSoon(false); load(); })
       .catch((err) => showToast?.(err.message || "Couldn't add."));
   };
+  const addDefaults = () => apiFetch("/admin/shop/categories/defaults", { method: "POST" })
+    .then((r) => { showToast?.(r.added ? r.added + " categories added." : "All suggested categories are already there."); logAdmin?.("Added suggested shop categories"); load(); })
+    .catch((err) => showToast?.(err.message || "Couldn't add."));
   const patch = (c, body) => apiFetch("/admin/shop/categories/" + c.id, { method: "PATCH", body: JSON.stringify(body) })
     .then(load).catch((err) => showToast?.(err.message || "Couldn't update."));
   const remove = (c) => {
@@ -4953,21 +5057,27 @@ function ShopCategoriesTab({ showToast, logAdmin }) {
   };
   return (
     <div className="space-y-4">
+      <div className="card p-4 flex gap-3 flex-wrap items-center justify-between">
+        <p className="text-sm" style={{ color: "var(--text-soft)" }}>Each category has its own details to fill in (for example Mobile Phones: brand, model, storage). Start with the suggested ones, then edit them.</p>
+        <button onClick={addDefaults} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>Add suggested categories</button>
+      </div>
       <form onSubmit={add} className="card p-4 flex gap-3 flex-wrap items-end">
         <label className="block flex-1" style={{ minWidth: 180 }}><span className="text-xs font-semibold block mb-1">New category</span>
-          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Groceries" /></label>
+          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Watches" /></label>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={comingSoon} onChange={(e) => setComingSoon(e.target.checked)} /> Coming soon</label>
         <button type="submit" className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: "var(--blue)", color: "#fff" }}>Add</button>
       </form>
       {state.loading ? <div className="card p-5"><Skeleton className="h-12 w-full" /></div>
         : state.error ? <div className="card p-5 text-sm" style={{ color: "var(--red)" }}>{state.error}</div>
-        : !state.categories.length ? <div className="card p-5 text-sm" style={{ color: "var(--text-soft)" }}>No categories yet.</div>
+        : !state.categories.length ? <div className="card p-5 text-sm" style={{ color: "var(--text-soft)" }}>No categories yet. Click "Add suggested categories".</div>
         : state.categories.map((c) => (
           <div key={c.id} className="card p-3 flex items-center gap-3 flex-wrap">
-            <p className="font-semibold text-sm flex-1" style={{ minWidth: 140 }}>{c.name} <span className="text-xs font-normal" style={{ color: "var(--text-soft)" }}>· {c.productCount} products</span></p>
+            <p className="font-semibold text-sm flex-1" style={{ minWidth: 140 }}>{c.name} <span className="text-xs font-normal" style={{ color: "var(--text-soft)" }}>· {c.productCount} products · {(c.fields || []).length} details</span></p>
+            <button onClick={() => setOpenId(openId === c.id ? null : c.id)} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}>{openId === c.id ? "Close" : "Edit details"}</button>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!c.comingSoon} onChange={(e) => patch(c, { comingSoon: e.target.checked })} /> Coming soon</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={c.active !== false} onChange={(e) => patch(c, { active: e.target.checked })} /> Visible</label>
             <button onClick={() => remove(c)} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: "var(--red-soft)", color: "var(--red)" }}>Delete</button>
+            {openId === c.id && <CategoryFieldsEditor key={c.id + (c.updatedAt || "")} category={c} onSaved={load} showToast={showToast} logAdmin={logAdmin} />}
           </div>
         ))}
     </div>
