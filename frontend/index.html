@@ -287,6 +287,32 @@
   .grid-dash-a{display:grid; grid-template-columns:1.6fr 1fr; gap:24px;}
   .grid-dash-b{display:grid; grid-template-columns:1.1fr 1fr; gap:24px;}
   @media(max-width:760px){ .grid-dash-a,.grid-dash-b{grid-template-columns:1fr;} }
+
+  .qa-wrap{display:flex; flex-direction:column; gap:14px;}
+  .qa-banner,.qa-goal{position:relative; overflow:hidden; border-radius:22px; background:#0B2A6F; color:#fff; box-shadow:0 10px 28px rgba(11,42,111,.22);}
+  .qa-banner-in{position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 22px; min-height:104px;}
+  .qa-bolt{height:48px; width:48px; border-radius:999px; background:linear-gradient(145deg,#3B82F6,#6D3FD9); display:grid; place-items:center; flex-shrink:0; box-shadow:0 6px 16px rgba(0,0,0,.25);}
+  .qa-h1{font-family:var(--font-display,inherit); font-weight:800; font-size:30px; line-height:1.05; letter-spacing:-.5px;}
+  .qa-sub{font-size:14px; margin-top:6px; opacity:.95;}
+  .qa-viewall{display:inline-flex; align-items:center; gap:6px; padding:11px 18px; border-radius:999px; background:rgba(8,27,76,.72); border:1px solid rgba(255,255,255,.18); color:#fff; font-weight:700; font-size:14px; white-space:nowrap; backdrop-filter:blur(4px);}
+  .qa-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .qa-copy{max-width:62%;}
+  .qa-card{position:relative; display:block; overflow:hidden; border-radius:22px; padding:20px; min-height:200px; box-shadow:0 8px 22px rgba(20,35,80,.08);}
+  .qa-icon{height:52px; width:52px; border-radius:16px; display:grid; place-items:center; margin-bottom:12px; box-shadow:0 6px 14px rgba(20,35,80,.18);}
+  .qa-title{font-family:var(--font-display,inherit); font-weight:800; font-size:19px; line-height:1.15; color:#12203F; margin-bottom:6px;}
+  .qa-text{font-size:13.5px; line-height:1.4; color:#5B6578; margin-bottom:12px;}
+  .qa-cta{display:inline-flex; align-items:center; gap:6px; font-weight:800; font-size:14.5px; white-space:nowrap;}
+  .qa-goal-in{position:relative; z-index:2; display:flex; align-items:center; gap:18px; padding:22px;}
+  .qa-target{height:68px; width:68px; border-radius:999px; background:linear-gradient(145deg,#1E6BE8,#0B3FA8); display:grid; place-items:center; flex-shrink:0; box-shadow:0 6px 16px rgba(0,0,0,.28);}
+  .qa-goal-h{font-family:var(--font-display,inherit); font-weight:800; font-size:26px; line-height:1.1;}
+  .qa-goal-p{font-size:14px; margin:8px 0 14px; opacity:.95; max-width:340px;}
+  .qa-start{display:inline-flex; align-items:center; gap:8px; padding:12px 22px; border-radius:999px; background:#fff; color:#0B2A6F; font-weight:800; font-size:14.5px;}
+  @media(max-width:560px){
+    .qa-h1{font-size:23px;} .qa-sub{font-size:12.5px;} .qa-banner-in{padding:14px; min-height:88px;} .qa-bolt{height:40px; width:40px;}
+    .qa-viewall{padding:9px 12px; font-size:12.5px;} .qa-grid{gap:10px;} .qa-card{padding:14px; min-height:196px; border-radius:18px;}
+    .qa-copy{max-width:72%;} .qa-title{font-size:14px; overflow-wrap:normal; word-break:normal;} .qa-text{font-size:12px;} .qa-cta{font-size:12.5px; gap:4px;} .qa-card svg[viewBox="0 0 160 130"]{width:44% !important; opacity:.9;} .qa-icon{height:44px; width:44px; border-radius:14px;}
+    .qa-goal-in{padding:16px; gap:12px;} .qa-target{height:52px; width:52px;} .qa-goal-h{font-size:19px;} .qa-goal-p{font-size:12px;}
+  }
   .dash-mobile-grid{display:none;}
   @media(max-width:720px){
     .dash-mobile-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
@@ -4245,7 +4271,7 @@ function ProductCard({
     h(Link, { to: "/products/" + product.id, style: { display: "block" } },
       h("div", { className: "product-thumb relative", style: { background: ACCENT_HEX[product.accent] || ACCENT_HEX.blue, margin: 0, borderRadius: 0 } },
         product.thumbnail
-          ? h("img", { src: product.thumbnail, alt: "", style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
+          ? h("img", { src: product.thumbnail, alt: "", style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: product.kind === "EBOOK" ? "contain" : "cover" } })
           : h(Icon, { name: "grad", size: 34 }),
         (product.featured || product.popular || product.new) && h("span", { style: { position: "absolute", top: 10, left: 10 } },
           h(ProductBadge, { product: product })
@@ -4618,6 +4644,10 @@ const LESSON_TYPE_ICON_EXTRA = { document: "fileText", external_resource: "link"
 // never returns lesson.content on the public course-detail endpoint),
 // this shows a plain "not available" state rather than inventing sample
 // text.
+function ebookDownloadUrl(url) {
+  // Cloudinary: fl_attachment makes the browser download the file instead of opening it.
+  return typeof url === "string" && url.indexOf("/upload/") > -1 && url.indexOf("fl_attachment") < 0 ? url.replace("/upload/", "/upload/fl_attachment/") : url;
+}
 function LessonContent({
   lesson: ls,
   accent = "blue"
@@ -4655,8 +4685,11 @@ function LessonContent({
       h("div", { className: "flex flex-col items-center justify-center", style: { height: 200, borderRadius: 12, background: "var(--mist)", border: "1px dashed var(--border)" } },
         h(Icon, { name: icon, size: 30, style: { color: "var(--muted)", marginBottom: 10 } }),
         h("p", { className: "text-sm font-medium" }, ls.title)),
-      h("a", { href: ls.content, target: "_blank", rel: "noreferrer", className: "btn btn-secondary btn-sm mt3" },
-        h(Icon, { name: "download", size: 13 }), ls.type === "pdf" ? " Open document" : " Open resource")
+      h("div", { className: "flex g2 flex-wrap" },
+        (ls.type === "pdf" || ls.type === "document") && h("a", { href: ebookDownloadUrl(ls.content), download: "", className: "btn btn-primary btn-sm mt3" },
+          h(Icon, { name: "download", size: 13 }), " Download"),
+        h("a", { href: ls.content, target: "_blank", rel: "noreferrer", className: "btn btn-secondary btn-sm mt3" },
+          h(Icon, { name: "eye", size: 13 }), ls.type === "pdf" ? " Open document" : " Open resource"))
     );
   }
   // type === "text" — content is the lesson body itself.
@@ -7234,7 +7267,7 @@ function Navbar({
     ) : /*#__PURE__*/React.createElement(React.Fragment, null,
       /*#__PURE__*/React.createElement(Link, {
         to: "/login",
-        className: "btn btn-ghost btn-sm hide-mobile"
+        className: "btn btn-ghost btn-sm"
       }, "Login"),
       /*#__PURE__*/React.createElement(Link, {
         to: "/signup",
@@ -7599,13 +7632,16 @@ function HomeNav({ path }) {
       !narrow && h("nav", { className: "flex items-center g2", style: { marginLeft: 24, flex: 1 } },
         links.map(([to, label]) => h(Link, { key: to, to, style: { padding: "9px 18px", borderRadius: 999, fontWeight: 600, fontSize: 15, color: "#fff", background: path === to ? LANDING_BLUE : "transparent" } }, label))),
       h("div", { className: "flex items-center g1", style: { marginLeft: "auto" } },
-        h(Link, { to: "/products", "aria-label": "Search products", style: iconBtn }, h(Icon, { name: "search", size: 21 })),
-        h(Link, { to: isLoggedIn ? "/dashboard" : "/login", "aria-label": isLoggedIn ? "My account" : "Log in", style: iconBtn }, h(Icon, { name: "user", size: 21 })),
+        !narrow && h(Link, { to: "/products", "aria-label": "Search products", style: iconBtn }, h(Icon, { name: "search", size: 21 })),
+        isLoggedIn
+          ? h(Link, { to: "/dashboard", "aria-label": "My account", style: iconBtn }, h(Icon, { name: "user", size: 21 }))
+          : h(Link, { to: "/login", "aria-label": "Log in", style: { display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", padding: narrow ? "8px 14px" : "9px 20px", margin: "0 4px", borderRadius: 999, background: "#fff", color: "#0B2A55", fontWeight: 800, fontSize: 14.5, boxShadow: "0 3px 12px rgba(0,0,0,.2)" } }, !narrow && h(Icon, { name: "user", size: 16 }), "Log in"),
         h(Link, { to: "/cart", "aria-label": "Cart", style: iconBtn }, h(Icon, { name: "bag", size: 21 }),
           h("span", { style: { position: "absolute", top: 0, right: 0, minWidth: 18, height: 18, borderRadius: 999, background: LANDING_BLUE, color: "#fff", fontSize: 10.5, fontWeight: 700, display: "grid", placeItems: "center", padding: "0 4px" } }, cart.count)),
         narrow && h("button", { type: "button", "aria-label": "Menu", onClick: () => setOpen(v => !v), style: iconBtn }, h(Icon, { name: open ? "x" : "menu", size: 23 })))),
     narrow && open && h("div", { className: "fade-in", style: { margin: "0 16px", borderRadius: 16, background: "rgba(8,24,52,.92)", backdropFilter: "blur(10px)", padding: 10 } },
       links.map(([to, label]) => h(Link, { key: to, to, onClick: () => setOpen(false), style: { display: "block", padding: "12px 14px", borderRadius: 10, color: "#fff", fontWeight: 600, background: path === to ? LANDING_BLUE : "transparent" } }, label)),
+      !isLoggedIn && h(Link, { to: "/login", onClick: () => setOpen(false), style: { display: "block", padding: "12px 14px", color: "#fff", fontWeight: 600 } }, "Log in"),
       !isLoggedIn && h(Link, { to: "/signup", onClick: () => setOpen(false), style: { display: "block", padding: "12px 14px", color: "#fff", fontWeight: 600 } }, "Create account")));
 }
 const LANDING_FEATURES = [
@@ -7654,6 +7690,7 @@ function LandingProductCard({ p, badge }) {
 }
 function Home() {
   const narrow = useIsNarrow();
+  const { isLoggedIn } = useAuth();
   const [cats, setCats] = useState(null);
   const [prods, setProds] = useState(null);
   useEffect(() => {
@@ -7680,6 +7717,7 @@ function Home() {
             h(Link, { to: "/products", style: { ...bigBtn, background: LANDING_BLUE, color: "#fff" } }, "Browse Products", h(Icon, { name: "arrowRight", size: 17 })),
             h(Link, { to: "/shop", style: { ...bigBtn, background: "#fff", color: "#0B2A55" } }, h(Icon, { name: "bag", size: 17 }), "Shop"),
             h(Link, { to: "/signup", style: { ...bigBtn, border: "1.5px solid #fff", color: "#fff", background: "rgba(255,255,255,.06)" } }, h(Icon, { name: "user", size: 17 }), "Create Free Account")),
+          !isLoggedIn && h("p", { style: { color: "#fff", fontSize: 15.5, marginTop: 18 } }, "Already have an account? ", h(Link, { to: "/login", style: { color: "#fff", fontWeight: 800, textDecoration: "underline", textUnderlineOffset: 3 } }, "Log in")),
           !narrow && h("div", { style: { position: "absolute", right: 40, bottom: 34, textAlign: "right", color: "#fff", fontFamily: "'Segoe Script','Brush Script MT',cursive", fontStyle: "italic", fontSize: 30, lineHeight: 1.15, textShadow: "0 2px 10px rgba(0,0,0,.45)" } },
             "Better Skills", h("br"), "Bigger Dreams",
             h("div", { style: { height: 3, width: 140, marginLeft: "auto", marginTop: 6, borderRadius: 3, background: LANDING_BLUE } }))))),
@@ -7788,6 +7826,8 @@ function mapCourseListItem(course) {
     currency: course.currency,
     thumbnail: course.thumbnail || null,
     featured: !!course.featured,
+    kind: course.kind || "COURSE",
+    topics: course.topics || [],
     moduleCount: course.moduleCount,
     reviewCount: course.reviewCount,
     studentCount: course.studentCount,
@@ -7814,6 +7854,8 @@ function mapCourseDetail(course) {
     coverImage: course.coverImage || null,
     instructor: course.instructor || null,
     featured: !!course.featured,
+    kind: course.kind || "COURSE",
+    topics: course.topics || [],
     moduleCount: course.moduleCount,
     lessonCount: course.lessonCount,
     studentCount: course.studentCount,
@@ -8280,10 +8322,13 @@ function ProductDetails({
 
   const aboutSection = product.description && h("section", { className: "mb8" },
     h("h2", { className: "font-display font-semibold text-lg mb3" }, "About This Product"),
-    h("p", { className: "text-sm", style: { lineHeight: 1.8, maxWidth: 680 } }, product.description)
+    h("p", { className: "text-sm", style: { lineHeight: 1.8, maxWidth: 680, whiteSpace: "pre-wrap" } }, product.description),
+    product.topics && product.topics.length > 0 && h("div", { style: { marginTop: 14 } },
+      h("p", { className: "text-xs muted mb2" }, "Topics covered"),
+      h("div", { className: "flex g2 flex-wrap" }, product.topics.map(t => h("span", { key: t, style: { padding: "4px 10px", borderRadius: 999, background: "var(--mist)", border: "1px solid var(--border)", fontSize: 12 } }, t))))
   );
 
-  const curriculumSection = product.modules.length > 0 && h("section", { className: "mb8" },
+  const curriculumSection = product.kind !== "EBOOK" && product.modules.length > 0 && h("section", { className: "mb8" },
     h("h2", { className: "font-display font-semibold text-lg mb4" }, "Product Curriculum"),
     h("p", { className: "text-xs muted mb4" }, product.modules.length, " modules", product.lessonCount !== undefined ? " · " + product.lessonCount + " lessons" : "", " · Free preview lessons marked below"),
     h(ProductCurriculum, { product, unlocked: false, onSelectLesson: handleSelectLesson })
@@ -8334,7 +8379,7 @@ function ProductDetails({
     h(ProductShareCard, { slug: params.id, title: product.title })
   );
 
-  const mobileBuyBar = h("div", { className: "hide-desktop card p4 flex items-center justify-between g3", style: { position: "sticky", bottom: 12, marginTop: 24 } },
+  const mobileBuyBar = h("div", { className: "hide-desktop card p4 flex items-center justify-between g3", style: { marginBottom: 24 } },
     h("div", null,
       h("p", { className: "font-display font-bold text-lg" }, "₵", product.price),
       product.lessonCount !== undefined && h("p", { className: "text-xs muted" }, product.lessonCount, " lessons")
@@ -8349,7 +8394,7 @@ function ProductDetails({
   return h("div", { className: "container-page py8" },
     h("div", { className: "product-thumb mb6 relative", style: { background: ACCENT_HEX[product.accent] || ACCENT_HEX.blue, height: 220 } },
       product.coverImage || product.thumbnail
-        ? h("img", { src: product.coverImage || product.thumbnail, alt: "", style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
+        ? h("img", { src: product.coverImage || product.thumbnail, alt: "", style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: product.kind === "EBOOK" ? "contain" : "cover" } })
         : h(Icon, { name: "grad", size: 54 })
     ),
     h("div", { className: "grid split-r300", style: { gap: 40, alignItems: "start" } },
@@ -8361,16 +8406,16 @@ function ProductDetails({
         h("h1", { className: "text-2xl font-bold mb3" }, product.title),
         product.desc && h("p", { className: "muted mb4", style: { maxWidth: 640, lineHeight: 1.6 } }, product.desc),
         statsLine,
+        mobileBuyBar,
         aboutSection,
         curriculumSection,
         instructorSection,
-        reviewsSection,
-        h(RelatedProducts, { product })
+        reviewsSection
       ),
       sidebar
     ),
-    mobileBuyBar,
     mobileShare,
+    h("div", { style: { marginTop: 40, paddingTop: 24, borderTop: "1px solid var(--border)", clear: "both" } }, h(RelatedProducts, { product })),
     preview && h(LessonPreviewModal, {
       product,
       moduleTitle: preview.module.title,
@@ -9606,7 +9651,7 @@ function Signup() {
         }, "Create your account"),
         h("p", {
           className: "text-sm muted mb6"
-        }, "It's free and only takes a minute."),
+        }, "It's free and only takes a minute. Already registered? ", h(Link, { to: "/login", className: "font-semibold text-blue" }, "Log in")),
         h("form", {
           onSubmit: onSubmit,
           className: "space-y"
@@ -9726,6 +9771,7 @@ function Signup() {
               border: "none"
             }
           }, submitting ? "Creating account…" : "Create Account"),
+          h("p", { className: "text-sm", style: { textAlign: "center", margin: "4px 0" } }, "Already have an account? ", h(Link, { to: "/login", className: "font-bold text-blue" }, "Log in")),
           h("div", {
             className: "flex items-center g3",
             style: { margin: "6px 0" }
@@ -10410,6 +10456,78 @@ function EarningsSparkline({ points }) {
     h("path", { d: area, fill: "url(#earnGrad)" }),
     h("path", { d: line, fill: "none", stroke: "var(--green)", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round" }));
 }
+
+/* Dashboard "Quick Access" block — banner header, four tinted cards, goal banner.
+   All artwork is inline SVG/CSS so it never depends on an external image. */
+function QAMountains({ id, sun = true }) {
+  return h("svg", { viewBox: "0 0 600 200", preserveAspectRatio: "xMaxYMid slice", "aria-hidden": "true", style: { position: "absolute", right: 0, top: 0, height: "100%", width: "75%", zIndex: 0 } },
+    h("defs", null,
+      h("linearGradient", { id: id + "sky", x1: "0", y1: "0", x2: "0", y2: "1" }, h("stop", { offset: "0", stopColor: "#5FA8F0" }), h("stop", { offset: ".65", stopColor: "#F6CFA0" }), h("stop", { offset: "1", stopColor: "#FFE9C7" })),
+      h("linearGradient", { id: id + "lake", x1: "0", y1: "0", x2: "0", y2: "1" }, h("stop", { offset: "0", stopColor: "#4FA3D9" }), h("stop", { offset: "1", stopColor: "#1E6FA8" })),
+      h("radialGradient", { id: id + "sun", cx: ".62", cy: ".62", r: ".5" }, h("stop", { offset: "0", stopColor: "#FFF6D6", stopOpacity: ".95" }), h("stop", { offset: "1", stopColor: "#FFF6D6", stopOpacity: "0" }))),
+    h("rect", { width: 600, height: 200, fill: "url(#" + id + "sky)" }),
+    sun && h("rect", { width: 600, height: 200, fill: "url(#" + id + "sun)" }),
+    h("path", { d: "M0 140 L90 70 L140 105 L230 30 L330 120 L380 85 L470 130 L600 80 L600 200 L0 200Z", fill: "#7FA6C9", opacity: ".85" }),
+    h("path", { d: "M0 160 L110 95 L190 140 L290 75 L380 150 L470 105 L600 150 L600 200 L0 200Z", fill: "#3F6F63" }),
+    h("path", { d: "M0 200 L0 178 Q150 160 300 176 T600 168 L600 200Z", fill: "url(#" + id + "lake)" }),
+    h("path", { d: "M420 200 L470 150 L520 175 L600 135 L600 200Z", fill: "#1F5B3A" }));
+}
+function QACardArt({ kind }) {
+  const box = { position: "absolute", right: 0, bottom: 0, width: "52%", height: "78%", zIndex: 0, pointerEvents: "none" };
+  if (kind === "books") return h("svg", { viewBox: "0 0 160 130", style: box, "aria-hidden": "true" },
+    h("rect", { x: 40, y: 78, width: 120, height: 26, rx: 3, fill: "#1D4FA8" }), h("rect", { x: 40, y: 98, width: 120, height: 5, fill: "#EEF3FF" }),
+    h("rect", { x: 56, y: 52, width: 104, height: 26, rx: 3, fill: "#2B63C9" }), h("rect", { x: 56, y: 72, width: 104, height: 5, fill: "#EEF3FF" }),
+    h("rect", { x: 96, y: 28, width: 18, height: 24, rx: 4, fill: "#fff" }), h("path", { d: "M105 28 C95 14 86 10 82 4 C96 6 108 14 105 28Z M105 28 C112 14 124 10 130 6 C128 18 118 26 105 28Z", fill: "#3E9B4F" }));
+  if (kind === "coins") return h("svg", { viewBox: "0 0 160 130", style: box, "aria-hidden": "true" },
+    [[30, 100, 4], [62, 100, 6], [96, 100, 9], [128, 100, 12]].map(([x, y, n], i) => h("g", { key: i }, Array.from({ length: n }).map((_, k) => h("ellipse", { key: k, cx: x + 14, cy: y - k * 7, rx: 15, ry: 5, fill: k % 2 ? "#F2B93B" : "#E0A02A", stroke: "#B9791B", strokeWidth: .8 })))),
+    h("path", { d: "M142 28 C132 16 124 14 118 6 C134 6 146 16 142 28Z M142 28 C150 16 160 14 160 8 C160 22 152 28 142 28Z", fill: "#4BA84F", transform: "translate(-6 0)" }));
+  if (kind === "hikers") return h("svg", { viewBox: "0 0 160 130", style: box, "aria-hidden": "true" },
+    h("path", { d: "M0 130 L60 96 L110 62 L160 20 L160 130Z", fill: "#3B3A8F", opacity: ".92" }),
+    [[70, 88], [92, 72], [114, 56], [136, 38]].map(([x, y], i) => h("g", { key: i, fill: "#17163F" }, h("circle", { cx: x, cy: y - 14, r: 4 }), h("rect", { x: x - 4, y: y - 10, width: 8, height: 16, rx: 3 }), h("rect", { x: x - 7, y: y - 8, width: 4, height: 12, rx: 2 }))));
+  return h("svg", { viewBox: "0 0 160 130", style: box, "aria-hidden": "true" },
+    h("path", { d: "M52 78 C52 36 108 36 108 78", fill: "none", stroke: "#18233F", strokeWidth: 9, strokeLinecap: "round" }),
+    h("rect", { x: 42, y: 70, width: 20, height: 36, rx: 9, fill: "#243457" }), h("rect", { x: 98, y: 70, width: 20, height: 36, rx: 9, fill: "#243457" }),
+    h("path", { d: "M108 100 Q112 118 84 120", fill: "none", stroke: "#18233F", strokeWidth: 4, strokeLinecap: "round" }), h("circle", { cx: 80, cy: 120, r: 5, fill: "#18233F" }));
+}
+function QACard({ to, title, text, cta, accent, tint, icon, art }) {
+  return h(Link, { to, className: "qa-card", style: { background: tint, border: "1px solid " + accent + "22" } },
+    h(QACardArt, { kind: art }),
+    h("div", { className: "qa-copy", style: { position: "relative", zIndex: 1 } },
+      h("span", { className: "qa-icon", style: { background: "linear-gradient(145deg," + accent + "," + accent + "cc)" } }, icon),
+      h("p", { className: "qa-title" }, title),
+      h("p", { className: "qa-text" }, text),
+      h("span", { className: "qa-cta", style: { color: accent } }, cta, h(Icon, { name: "arrowRight", size: 14 }))));
+}
+function DashQuickAccess({ enrollments }) {
+  const wh = { fill: "none", stroke: "#fff", strokeWidth: 2.2, strokeLinecap: "round", strokeLinejoin: "round" };
+  const chartIcon = h("svg", { width: 26, height: 26, viewBox: "0 0 24 24", ...wh }, h("path", { d: "M4 20V12M10 20V8M16 20v-6M22 20H2" }), h("path", { d: "M5 8l5-4 4 3 6-5M16 2h4v4" }));
+  const targetIcon = h("svg", { width: 40, height: 40, viewBox: "0 0 24 24", ...wh }, h("circle", { cx: 12, cy: 12, r: 9 }), h("circle", { cx: 12, cy: 12, r: 5 }), h("circle", { cx: 12, cy: 12, r: 1.4, fill: "#fff" }), h("path", { d: "M12 12l8-8M16 4h4v4" }));
+  return h("div", { className: "qa-wrap" },
+    h("div", { className: "qa-banner" },
+      h(QAMountains, { id: "qab" }),
+      h("div", { style: { position: "absolute", inset: 0, background: "linear-gradient(90deg,#0B2A6F 0%,rgba(11,42,111,.92) 36%,rgba(11,42,111,.25) 70%,rgba(11,42,111,.05))", zIndex: 1 } }),
+      h("div", { className: "qa-banner-in" },
+        h("div", { className: "flex items-center g3", style: { minWidth: 0 } },
+          h("span", { className: "qa-bolt" }, h(Icon, { name: "lightning", size: 22, style: { color: "#fff" } })),
+          h("div", { style: { minWidth: 0 } },
+            h("p", { className: "qa-h1" }, "Quick ", h("span", { style: { color: "#3FD2FF" } }, "Access")),
+            h("p", { className: "qa-sub" }, "Everything you need, all in one place."))),
+        h(Link, { to: "/products", className: "qa-viewall" }, h(Icon, { name: "eye", size: 16 }), " View All ", h(Icon, { name: "arrowRight", size: 15 })))),
+    h("div", { className: "qa-grid" },
+      h(QACard, { to: "/dashboard/learning", title: "Learning Paths", text: "Follow structured paths, get certified and grow your skills.", cta: "Explore Now", accent: "#1E6BE8", tint: "linear-gradient(135deg,#F1F6FF,#E3EEFF)", icon: h(Icon, { name: "grad", size: 26, style: { color: "#fff" } }), art: "books" }),
+      h(QACard, { to: "/dashboard/wallet", title: "Earnings & Commissions", text: "Track your progress, see your commissions and rewards.", cta: "View Earnings", accent: "#14804F", tint: "linear-gradient(135deg,#EFFAF3,#DDF3E6)", icon: chartIcon, art: "coins" }),
+      h(QACard, { to: "/dashboard/community-chat", title: "Community", text: "Connect with like-minded learners, share ideas and grow together.", cta: "Join Community", accent: "#6D3FD9", tint: "linear-gradient(135deg,#F5F0FF,#E7DEFF)", icon: h(Icon, { name: "users", size: 26, style: { color: "#fff" } }), art: "hikers" }),
+      h(QACard, { to: "/contact", title: "Support", text: "Need help? Our team is here for you, anytime.", cta: "Get Help", accent: "#0F62E0", tint: "linear-gradient(135deg,#F0F6FF,#E2EEFF)", icon: h(Icon, { name: "headphones", size: 26, style: { color: "#fff" } }), art: "headset" })),
+    h("div", { className: "qa-goal" },
+      h(QAMountains, { id: "qag", sun: false }),
+      h("div", { style: { position: "absolute", inset: 0, background: "linear-gradient(90deg,#0B2A6F 0%,rgba(11,42,111,.94) 45%,rgba(11,42,111,.2) 80%)", zIndex: 1 } }),
+      h("div", { className: "qa-goal-in" },
+        h("span", { className: "qa-target" }, targetIcon),
+        h("div", { style: { minWidth: 0 } },
+          h("p", { className: "qa-goal-h" }, "Reach Your ", h("br"), h("span", { style: { color: "#3FD2FF" } }, "Goals Faster!")),
+          h("p", { className: "qa-goal-p" }, "Complete courses, earn rewards and unlock your full potential."),
+          h(Link, { to: "/products", className: "qa-start" }, "Start Now ", h(Icon, { name: "arrowRight", size: 15 }))))));
+}
 function QuickActionButton({ icon, bg, label, to }) {
   return h(Link, {
     to: to,
@@ -10602,53 +10720,7 @@ function CustomerDashboard() {
       )
     ),
 
-    h("div", { className: "flex items-center justify-between", style: { marginTop: 4 } },
-      h("p", { className: "font-display font-bold", style: { fontSize: 19 } }, "Quick Access"),
-      h(Link, { to: "/products", className: "flex items-center g1 font-semibold text-sm", style: { color: "var(--ink)" } }, "View All", h(Icon, { name: "arrowRight", size: 13 }))
-    ),
-
-    h("div", { className: "dash-mobile-grid" },
-      h(Link, { to: "/dashboard/learning", className: "card dash-mobile-card" },
-        h("span", { className: "dmc-icon", style: { background: "#EDE9FE", color: "#6D3FD9" } }, h(Icon, { name: "grad", size: 18 })),
-        h("p", { className: "dmc-title" }, "My Learning"),
-        h("p", { className: "dmc-sub" }, enrollments.length + (enrollments.length === 1 ? " course available" : " courses available")),
-        h("span", { className: "dmc-link", style: { color: "#6D3FD9" } }, "Continue Learning", h(Icon, { name: "arrowRight", size: 12 }))
-      ),
-      h(Link, { to: "/dashboard/wallet", className: "card dash-mobile-card" },
-        h("span", { className: "dmc-icon", style: { background: "#EAF3EE", color: "var(--accentDeep)" } }, h(Icon, { name: "wallet", size: 18 })),
-        h("p", { className: "dmc-title" }, "Wallet"),
-        h("p", { className: "dmc-sub" }, formatGHS(availableBalance)),
-        h("span", { className: "dmc-link", style: { color: "var(--accentDeep)" } }, "View Wallet", h(Icon, { name: "arrowRight", size: 12 }))
-      ),
-      h(Link, { to: "/dashboard/orders", className: "card dash-mobile-card" },
-        h("span", { className: "dmc-icon", style: { background: "#FCEADC", color: "#C2660F" } }, h(Icon, { name: "bag", size: 18 })),
-        h("p", { className: "dmc-title" }, "My Orders"),
-        h("p", { className: "dmc-sub" }, orders.length + (orders.length === 1 ? " order" : " orders")),
-        h("span", { className: "dmc-link", style: { color: "#C2660F" } }, "View Orders", h(Icon, { name: "arrowRight", size: 12 }))
-      ),
-      h(Link, { to: "/dashboard/cashback", className: "card dash-mobile-card" },
-        h("span", { className: "dmc-icon", style: { background: "#E7F0FF", color: "var(--blue)" } }, h(Icon, { name: "gift", size: 18 })),
-        h("p", { className: "dmc-title" }, "Cashback"),
-        h("p", { className: "dmc-sub" }, formatGHS(cashbackBalance)),
-        h("span", { className: "dmc-link", style: { color: "var(--blue)" } }, "View Details", h(Icon, { name: "arrowRight", size: 12 }))
-      )
-    ),
-
-    h(Link, {
-      to: "/products",
-      className: "flex items-center g4",
-      style: {
-        borderRadius: 16, padding: "18px 20px", background: "linear-gradient(120deg, #FCEFDC, #F8E3C4)",
-        border: "1px solid #F0D9AE"
-      }
-    },
-      h("span", { style: { fontSize: 30, flexShrink: 0 } }, "🎁"),
-      h("div", { style: { flex: 1, minWidth: 0 } },
-        h("p", { className: "font-display font-bold", style: { fontSize: 15.5, color: "var(--ink)" } }, "Earn More, Learn More!"),
-        h("p", { className: "text-sm", style: { color: "var(--muted)", marginTop: 2 } }, "Complete courses and make purchases to earn amazing cashback.")
-      ),
-      h("span", { className: "hide-mobile", style: { flexShrink: 0, padding: "10px 18px", borderRadius: 10, background: "var(--ink)", color: "#fff", fontWeight: 700, fontSize: 13.5, display: "flex", alignItems: "center", gap: 6 } }, "Explore Courses", h(Icon, { name: "chevronRight", size: 14 }))
-    ),
+    h(DashQuickAccess, { enrollments, availableBalance }),
 
     h("div", { className: "grid-dash-b" },
       h("div", { className: "card p5" },
@@ -11877,6 +11949,30 @@ function creatorApprovalBadge(c) {
   if (s === "REJECTED") return h(Badge, { accent: "red" }, "Rejected");
   return h(Badge, { accent: "blue" }, "Draft");
 }
+// Phone photos are often huge or in odd formats (HEIC/AVIF). Re-draw them as a
+// resized JPEG so the upload is small and always in a type the server accepts.
+function prepareImageForUpload(file, maxSide = 1600) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type || "") && !/\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(file.name || "")) { reject(new Error("Please choose an image (JPG, PNG or WEBP).")); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale)), hgt = Math.max(1, Math.round(img.naturalHeight * scale));
+        const c = document.createElement("canvas"); c.width = w; c.height = hgt;
+        const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, hgt); ctx.drawImage(img, 0, 0, w, hgt);
+        c.toBlob(blob => {
+          URL.revokeObjectURL(url);
+          if (!blob) { reject(new Error("Couldn't read that image. Try a JPG or PNG.")); return; }
+          resolve(new File([blob], (file.name || "cover").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+        }, "image/jpeg", 0.88);
+      } catch (e) { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image. Try a JPG or PNG.")); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't open that image. Try a JPG or PNG.")); };
+    img.src = url;
+  });
+}
 async function uploadCreatorFile(file, folder) {
   const token = getAuthToken();
   const fd = new FormData();
@@ -11919,6 +12015,7 @@ function CreatorStudio() {
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newPrice, setNewPrice] = useState("");
+  const [newKind, setNewKind] = useState("COURSE");
   const load = useCallback(() => {
     setState(s => ({ ...s, loading: true, error: null }));
     Promise.all([apiFetch("/creator/courses"), apiFetch("/creator/earnings")])
@@ -11931,7 +12028,7 @@ function CreatorStudio() {
     e.preventDefault();
     setCreating(true);
     try {
-      const r = await apiFetch("/creator/courses", { method: "POST", body: JSON.stringify({ title: newTitle.trim(), price: Number(newPrice) }) });
+      const r = await apiFetch("/creator/courses", { method: "POST", body: JSON.stringify({ title: newTitle.trim(), price: Number(newPrice), kind: newKind }) });
       navigate("/creator/products/" + r.course.id);
     } catch (err) {
       toast({ type: "error", title: "Couldn't create product", description: err.message });
@@ -11949,8 +12046,10 @@ function CreatorStudio() {
     ea && h("div", { className: "mb6" }, h(Link, { to: "/dashboard/withdraw", className: "btn btn-secondary btn-sm" }, "Withdraw earnings"), " ", h(Link, { to: "/dashboard/wallet", className: "btn btn-ghost btn-sm" }, "Wallet")),
     h("form", { onSubmit: create, className: "card p5 mb6" },
       h("p", { className: "font-medium mb3" }, "New product"),
+      h("div", { className: "flex g2 mb3" }, [["COURSE", "Course"], ["EBOOK", "Ebook (PDF)"]].map(([v, l]) =>
+        h("button", { key: v, type: "button", className: "btn btn-sm " + (newKind === v ? "btn-primary" : "btn-secondary"), onClick: () => setNewKind(v) }, l))),
       h("div", { className: "flex g3 flex-wrap", style: { alignItems: "flex-end" } },
-        h("div", { style: { flex: 2, minWidth: 200 } }, h(Input, { id: "np-title", label: "Product title", placeholder: "e.g. Beginner Forex Guide", value: newTitle, onChange: e => setNewTitle(e.target.value) })),
+        h("div", { style: { flex: 2, minWidth: 200 } }, h(Input, { id: "np-title", label: newKind === "EBOOK" ? "Ebook name" : "Product title", placeholder: newKind === "EBOOK" ? "e.g. Beginner Forex Guide (Ebook)" : "e.g. Beginner Forex Guide", value: newTitle, onChange: e => setNewTitle(e.target.value) })),
         h("div", { style: { flex: 1, minWidth: 120 } }, h(Input, { id: "np-price", label: "Price (GH₵)", type: "number", placeholder: "50", value: newPrice, onChange: e => setNewPrice(e.target.value) })),
         h("button", { type: "submit", className: "btn btn-primary btn-md", disabled: creating || newTitle.trim().length < 2 || !(Number(newPrice) >= 1) }, creating ? "Creating…" : "Create"))),
     h("h2", { className: "font-semibold mb3" }, "Your products"),
@@ -11961,7 +12060,7 @@ function CreatorStudio() {
           h("div", { key: c.id, className: "card p4 flex items-center justify-between g3 flex-wrap" },
             h("div", { style: { minWidth: 0 } },
               h("p", { className: "font-medium truncate" }, c.title),
-              h("p", { className: "text-xs muted" }, formatGHS(c.price)),
+              h("p", { className: "text-xs muted" }, (c.kind === "EBOOK" ? "Ebook · " : "") + formatGHS(c.price)),
               c.approvalStatus === "REJECTED" && c.rejectionReason && h("p", { className: "text-xs", style: { color: "#b91c1c", marginTop: 4 } }, "Reason: " + c.rejectionReason),
               c.slug && h(CreatorLinkRow, { slug: c.slug, live: c.status === "PUBLISHED" })),
             h("div", { className: "flex items-center g2" },
@@ -11984,7 +12083,7 @@ function CreatorProductEditor({ params }) {
         setCourse(r.course);
         setForm(f => f || {
           title: r.course.title || "", shortDescription: r.course.shortDescription || "", description: r.course.description || "",
-          price: String(r.course.price || ""), categoryId: r.course.categoryId || "", thumbnail: r.course.thumbnail || "",
+          price: String(r.course.price || ""), categoryId: r.course.categoryId || "", thumbnail: r.course.thumbnail || "", topics: (r.course.topics || []).join(", "),
         });
       })
       .catch(err => setError(err.message));
@@ -12004,13 +12103,41 @@ function CreatorProductEditor({ params }) {
     title: form.title.trim(), shortDescription: form.shortDescription.trim() || undefined, description: form.description.trim() || undefined,
     price: Number(form.price), categoryId: form.categoryId || undefined,
     thumbnail: form.thumbnail || undefined, coverImage: form.thumbnail || undefined,
+    topics: form.topics.split(",").map(t => t.trim()).filter(Boolean).slice(0, 15),
   }) }), "Saved.");
   const onThumb = async e => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     setBusy(true);
-    try { const url = await uploadCreatorFile(f, "course-thumbnails"); setForm(x => ({ ...x, thumbnail: url })); toast({ type: "success", title: "Cover uploaded. Press Save to keep it." }); }
+    try {
+      const img = await prepareImageForUpload(f);
+      const url = await uploadCreatorFile(img, "course-thumbnails");
+      // Save the cover on the product straight away so it can't get lost.
+      await apiFetch("/creator/courses/" + course.id, { method: "PATCH", body: JSON.stringify({ thumbnail: url, coverImage: url }) });
+      setForm(x => ({ ...x, thumbnail: url }));
+      toast({ type: "success", title: "Cover saved." });
+    }
     catch (err) { toast({ type: "error", title: "Upload failed", description: err.message }); }
+    setBusy(false);
+  };
+  const isEbook = course.kind === "EBOOK";
+  const ebookLesson = isEbook ? ((course.modules || []).flatMap(m => m.lessons || []).find(l => l.type === "PDF") || null) : null;
+  const onEbookFile = async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast({ type: "error", title: "Please choose a PDF file." }); return; }
+    setBusy(true);
+    try {
+      const url = await uploadCreatorFile(f, "lesson-materials");
+      if (ebookLesson) await apiFetch("/creator/lessons/" + ebookLesson.id, { method: "PATCH", body: JSON.stringify({ content: url }) });
+      else {
+        let mod = (course.modules || [])[0];
+        if (!mod) { const r = await apiFetch("/creator/courses/" + course.id + "/modules", { method: "POST", body: JSON.stringify({ title: "Ebook" }) }); mod = r.module; }
+        await apiFetch("/creator/modules/" + mod.id + "/lessons", { method: "POST", body: JSON.stringify({ title: form.title.trim() || "Ebook", type: "PDF", content: url }) });
+      }
+      toast({ type: "success", title: "Ebook PDF uploaded." }); load();
+    } catch (err) { toast({ type: "error", title: "Upload failed", description: err.message }); }
     setBusy(false);
   };
   const addModule = () => run(async () => { await apiFetch("/creator/courses/" + course.id + "/modules", { method: "POST", body: JSON.stringify({ title: newModule.trim() }) }); setNewModule(""); }, "Module added.");
@@ -12027,21 +12154,28 @@ function CreatorProductEditor({ params }) {
     h("div", { className: "card p5 mb5" },
       h("p", { className: "font-medium mb3" }, "Product details"),
       h("div", { className: "space-y" },
-        h(Input, { id: "cp-title", label: "Title", value: form.title, onChange: set("title") }),
-        h(Input, { id: "cp-short", label: "Short description", value: form.shortDescription, onChange: set("shortDescription") }),
+        h(Input, { id: "cp-title", label: isEbook ? "Ebook name" : "Title", value: form.title, onChange: set("title") }),
+        !isEbook && h(Input, { id: "cp-short", label: "Short description", value: form.shortDescription, onChange: set("shortDescription") }),
         h("div", null, h("label", { className: "label-field", htmlFor: "cp-desc" }, "Description"),
           h("textarea", { id: "cp-desc", className: "input-field", rows: 5, value: form.description, onChange: set("description") })),
+        isEbook && h(Input, { id: "cp-topics", label: "Topics (separate with commas)", placeholder: "e.g. Forex, Trading basics, Risk management", value: form.topics, onChange: set("topics") }),
         h(Input, { id: "cp-price", label: "Price (GH₵)", type: "number", value: form.price, onChange: set("price") }),
         h("div", null, h("label", { className: "label-field", htmlFor: "cp-cat" }, "Category"),
           h("select", { id: "cp-cat", className: "input-field", value: form.categoryId, onChange: set("categoryId") },
             h("option", { value: "" }, "Choose a category"),
             categories.map(c => h("option", { key: c.id, value: c.id }, c.name)))),
         h("div", null, h("label", { className: "label-field" }, "Cover image"),
-          form.thumbnail && h("img", { src: form.thumbnail, alt: "", style: { width: 180, borderRadius: 8, marginBottom: 8, display: "block" } }),
-          h("input", { type: "file", accept: "image/*", onChange: onThumb, disabled: busy })),
+          form.thumbnail && h("img", { src: form.thumbnail, alt: "", style: { width: 180, maxHeight: 260, objectFit: "contain", borderRadius: 8, marginBottom: 8, display: "block", background: "#f3f5f2" } }),
+          h("input", { type: "file", accept: "image/*", onChange: onThumb, disabled: busy }), busy && h("p", { className: "text-xs muted", style: { marginTop: 4 } }, "Uploading…")),
         h("p", { className: "text-xs muted" }, "The platform keeps a percentage of each sale; the rest is added to your store earnings automatically."),
         h("button", { type: "button", className: "btn btn-primary btn-md", onClick: save, disabled: busy || form.title.trim().length < 2 || !(Number(form.price) >= 1) }, "Save details"))),
-    h("div", { className: "card p5 mb5" },
+    isEbook && h("div", { className: "card p5 mb5" },
+      h("p", { className: "font-medium mb1" }, "Ebook file (PDF)"),
+      h("p", { className: "text-xs muted mb3" }, "Buyers can download this PDF after they pay. Max 10MB."),
+      ebookLesson && h("p", { className: "text-sm mb2", style: { color: "var(--greenDeep)" } }, "✓ PDF attached"),
+      h("input", { type: "file", accept: ".pdf,application/pdf", onChange: onEbookFile, disabled: busy }),
+      ebookLesson && h("p", { className: "text-xs muted", style: { marginTop: 6 } }, "Choose a new PDF to replace the current one.")),
+    !isEbook && h("div", { className: "card p5 mb5" },
       h("p", { className: "font-medium mb3" }, "Content"),
       (course.modules || []).map(m => h(CreatorModuleEditor, { key: m.id, mod: m, reload: load, toast })),
       h("div", { className: "flex g2 mt3", style: { marginTop: 12 } },
@@ -12188,8 +12322,8 @@ function shopProductLink(slug) {
 
 const SHOP_GRID = { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 14 };
 function ShopImage({ src, alt, height = 150 }) {
-  return h("div", { style: { width: "100%", height, background: "#F3F5F2", borderRadius: 10, overflow: "hidden", display: "grid", placeItems: "center", color: "#9aa39b" } },
-    src ? h("img", { src, alt: alt || "", loading: "lazy", style: { width: "100%", height: "100%", objectFit: "cover" } }) : h(Icon, { name: "bag", size: 34 }));
+  return h("div", { style: { width: "100%", height, background: "#fff", border: "1px solid #eef0ed", borderRadius: 10, overflow: "hidden", display: "grid", placeItems: "center", color: "#9aa39b" } },
+    src ? h("img", { src, alt: alt || "", loading: "lazy", style: { width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" } }) : h(Icon, { name: "bag", size: 34 }));
 }
 function ShopStepper({ qty, max, onChange, size = "sm" }) {
   const btn = { width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "#fff", fontWeight: 700, fontSize: 16, cursor: "pointer" };
@@ -12364,6 +12498,26 @@ function ShopBrowse({ query }) {
       more.error && h("p", { className: "text-sm", style: { color: "#b91c1c", textAlign: "center", marginTop: 8 } }, more.error)));
 }
 
+function ShopGallery({ images, name, height = 380 }) {
+  const [i, setI] = useState(0);
+  useEffect(() => { setI(0); }, [images && images[0]]);
+  const list = images && images.length ? images : [];
+  const cur = list[Math.min(i, Math.max(0, list.length - 1))] || null;
+  return h("div", null,
+    h(ShopImage, { src: cur, alt: name, height }),
+    list.length > 1 && h("div", { style: { display: "flex", gap: 8, marginTop: 10, overflowX: "auto" } },
+      list.map((src, k) => h("button", { key: src + k, type: "button", "aria-label": "Show photo " + (k + 1), onClick: () => setI(k),
+        style: { flex: "0 0 auto", width: 64, height: 64, padding: 0, borderRadius: 8, overflow: "hidden", cursor: "pointer", background: "#fff", border: k === i ? "2px solid var(--ink)" : "1px solid var(--border)" } },
+        h("img", { src, alt: "", style: { width: "100%", height: "100%", objectFit: "contain", background: "#F3F5F2", display: "block" } })))));
+}
+function ShopSpecs({ specs }) {
+  if (!specs || !specs.length) return null;
+  return h("div", { style: { margin: "0 0 18px" } },
+    h("p", { className: "font-semibold text-sm", style: { marginBottom: 6 } }, "Details"),
+    h("div", { style: { border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" } },
+      specs.map((r, k) => h("div", { key: r.label, style: { display: "flex", gap: 12, padding: "8px 12px", fontSize: 14, background: k % 2 ? "#fff" : "#F8F9F7" } },
+        h("span", { className: "muted", style: { flex: "0 0 42%" } }, r.label), h("span", { style: { fontWeight: 600 } }, r.value)))));
+}
 function ShopProductPage({ params }) {
   const cart = useShopCart();
   const { toast } = useToast();
@@ -12388,7 +12542,7 @@ function ShopProductPage({ params }) {
         : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 28, alignItems: "start" } },
             h("div", { style: { position: "relative" } },
               p.discountPercent > 0 && h("span", { style: { position: "absolute", top: 12, left: 12, zIndex: 1, background: "#dc2626", color: "#fff", fontSize: 12, fontWeight: 700, padding: "4px 9px", borderRadius: 6 } }, "−" + p.discountPercent + "%"),
-              h(ShopImage, { src: p.image, alt: p.name, height: 380 })),
+              h(ShopGallery, { images: p.images && p.images.length ? p.images : (p.image ? [p.image] : []), name: p.name, height: 380 })),
             h("div", null,
               p.category && h(Link, { to: "/shop/browse?category=" + p.category.slug, className: "text-xs muted" }, p.category.name),
               h("h1", { className: "font-display font-bold", style: { fontSize: 26, margin: "4px 0 8px" } }, p.name),
@@ -12399,6 +12553,7 @@ function ShopProductPage({ params }) {
                 p.origin && h(Badge, { accent: "blue" }, p.origin),
                 p.unitLabel && h(Badge, { accent: "gold" }, p.unitLabel),
                 h(Badge, { accent: p.inStock ? "green" : "red" }, !p.inStock ? "Out of stock" : p.stockState === "LOW_STOCK" ? "Only " + p.stock + " left" : "In stock")),
+              h(ShopSpecs, { specs: p.specs }),
               p.description && h("p", { className: "text-sm", style: { color: "#3C4457", lineHeight: 1.6, marginBottom: 18, whiteSpace: "pre-line" } }, p.description),
               p.inStock && h("div", { className: "flex items-center g3 flex-wrap mb3" },
                 h(ShopStepper, { qty, max, onChange: q => setQty(Math.max(1, Math.min(max, q))) }),
