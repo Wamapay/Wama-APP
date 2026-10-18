@@ -15,3 +15,6 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS "courses_creatorId_idx" ON "courses"("creatorId");
 CREATE INDEX IF NOT EXISTS "courses_approvalStatus_idx" ON "courses"("approvalStatus");
 ALTER TABLE "platform_settings" ADD COLUMN IF NOT EXISTS "creatorFeePercent" DECIMAL(5,2) NOT NULL DEFAULT 20;
+
+ALTER TABLE "courses" ADD COLUMN IF NOT EXISTS "kind" TEXT NOT NULL DEFAULT 'COURSE';
+ALTER TABLE "courses" ADD COLUMN IF NOT EXISTS "topics" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

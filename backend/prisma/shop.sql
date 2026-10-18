@@ -92,3 +92,9 @@ CREATE TABLE IF NOT EXISTS "shop_settings" (
   "announcement" TEXT NOT NULL DEFAULT '',
   "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Multiple product photos, category-specific fields and their values.
+ALTER TABLE "shop_categories" ADD COLUMN IF NOT EXISTS "fields" JSONB;
+ALTER TABLE "shop_products" ADD COLUMN IF NOT EXISTS "images" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "shop_products" ADD COLUMN IF NOT EXISTS "attributes" JSONB;
+UPDATE "shop_products" SET "images" = ARRAY["image"] WHERE "image" IS NOT NULL AND cardinality("images") = 0;
