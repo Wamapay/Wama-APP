@@ -48,6 +48,12 @@ const adminCreateCategory = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { statusCode: 201, message: "Category created", data: { category } });
 });
 
+const adminAddDefaultCategories = asyncHandler(async (req, res) => {
+  const added = await shop.addDefaultCategories();
+  await log(req, `Added ${added} suggested shop categories`, "ShopCategory", "defaults");
+  return ApiResponse.success(res, { message: added ? `${added} categories added` : "All suggested categories are already there", data: { added } });
+});
+
 const adminUpdateCategory = asyncHandler(async (req, res) => {
   const category = await shop.updateCategory(req.params.id, req.body);
   await log(req, `Updated shop category ${category.name}`, "ShopCategory", category.id);
@@ -120,6 +126,7 @@ const shareProduct = async (req, res) => {
 
 module.exports = {
   shareProduct,
+  adminAddDefaultCategories,
   config, categories, products, product, createOrder, trackOrder,
   adminSettings, adminUpdateSettings, adminCategories, adminCreateCategory, adminUpdateCategory, adminDeleteCategory,
   adminProducts, adminCreateProduct, adminUpdateProduct, adminDeleteProduct, adminOrders, adminOrder, adminUpdateOrderStatus,
