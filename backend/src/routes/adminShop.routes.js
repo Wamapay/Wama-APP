@@ -17,6 +17,7 @@ router.get("/settings", controller.adminSettings);
 router.patch("/settings", requirePermission(PERMISSIONS.MANAGE_SETTINGS), validate(s.updateSettingsSchema), controller.adminUpdateSettings);
 
 router.get("/categories", controller.adminCategories);
+router.post("/categories/defaults", controller.adminAddDefaultCategories);
 router.post("/categories", validate(s.createCategorySchema), controller.adminCreateCategory);
 router.patch("/categories/:id", validate(s.updateCategorySchema), controller.adminUpdateCategory);
 router.delete("/categories/:id", validate(s.idParamSchema), controller.adminDeleteCategory);
